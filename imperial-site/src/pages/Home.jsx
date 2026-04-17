@@ -1,9 +1,9 @@
 export default function Home() {
   const products = [
-    { name: "Fresh Salmon", price: "$15/lb", image: "https://via.placeholder.com/200x150?text=Salmon" },
-    { name: "Lobster Tails", price: "$25/lb", image: "https://via.placeholder.com/200x150?text=Lobster" },
-    { name: "Shrimp", price: "$12/lb", image: "https://via.placeholder.com/200x150?text=Shrimp" },
-    { name: "Tuna Steak", price: "$18/lb", image: "https://via.placeholder.com/200x150?text=Tuna" },
+    { name: "King Crab Legs", price: "On Enquiry", image: "/images/king-crab.jpg" },
+    { name: "Snow Crab Legs", price: "On Enquiry", image: "/images/snow-crab.jpg" },
+    { name: "Tuna Toro", price: "On Enquiry", image: "/images/tuna-toro.jpg" },
+    { name: "Squid", price: "On Enquiry", image: "/images/squid.jpg" },
   ];
 
   return (
