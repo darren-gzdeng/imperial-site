@@ -4,7 +4,7 @@ export default function Header() {
   return (
     <header className="site-header">
       <nav className="site-nav">
-        <div className="logo">Imperial Ocean Select</div>
+        <div className="logo">Imperial Ocean</div>
         <ul className="nav-links">
           <li><Link to="/">Home</Link></li>
           <li><Link to="/about">About</Link></li>

@@ -8,7 +8,7 @@ export default function Home() {
 
   return (
     <section>
-      <h1>Welcome to Seafood Empire</h1>
+      <h1>Welcome to Imperial Ocean Select</h1>
       <p>Fresh seafood delivered to your door</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', marginTop: '20px' }}>
         {products.map((product, index) => (
