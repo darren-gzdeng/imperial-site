@@ -1,16 +1,47 @@
 import { Link } from "react-router";
+import { Search, User, ShoppingBag, Languages, ChevronDown } from "lucide-react";
+
+const navItems = [
+  { label: "New In", path: "/new" },
+  { label: "Seafood", path: "/seafood", hasDropdown: true },
+  { label: "Meat", path: "/meat", hasDropdown: true },
+  { label: "Hotpot", path: "/hotpot", hasDropdown: true },
+  { label: "Bulk Buy", path: "/bulk-buy" },
+  { label: "Gift Card", path: "/gift-card" },
+];
 
 export default function Header() {
   return (
     <header className="site-header">
-      <nav className="site-nav">
-        <div className="logo">Imperial Ocean</div>
-        <ul className="nav-links">
-          <li><Link to="/">Home</Link></li>
-          <li><Link to="/about">About</Link></li>
-          <li><Link to="/contact">Contact</Link></li>
-        </ul>
-      </nav>
+      <div className="header-inner">
+        <Link to="/" className="brand">
+          Imperial Site
+        </Link>
+
+        <nav className="main-nav">
+          {navItems.map((item) => (
+            <Link key={item.label} to={item.path} className="nav-item">
+              <span>{item.label}</span>
+              {item.hasDropdown && <ChevronDown size={14} strokeWidth={1.8} />}
+            </Link>
+          ))}
+        </nav>
+
+        <div className="header-actions">
+          <button className="icon-btn" aria-label="Search">
+            <Search size={18} strokeWidth={2} />
+          </button>
+          <button className="icon-btn" aria-label="Account">
+            <User size={18} strokeWidth={2} />
+          </button>
+          <button className="icon-btn" aria-label="Cart">
+            <ShoppingBag size={18} strokeWidth={2} />
+          </button>
+          <button className="icon-btn" aria-label="Language">
+            <Languages size={18} strokeWidth={2} />
+          </button>
+        </div>
+      </div>
     </header>
   );
 }
