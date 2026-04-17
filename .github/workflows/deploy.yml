@@ -17,6 +17,11 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: imperial-site
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,6 +31,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: imperial-site/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -39,7 +45,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./dist
+          path: imperial-site/dist
 
   deploy:
     needs: build
