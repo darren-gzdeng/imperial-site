@@ -2,12 +2,12 @@ import { Link } from "react-router";
 import { Search, User, ShoppingBag, Languages, ChevronDown } from "lucide-react";
 
 const navItems = [
-  { label: "New In", path: "/new" },
-  { label: "Seafood", path: "/seafood", hasDropdown: true },
-  { label: "Meat", path: "/meat", hasDropdown: true },
-  { label: "Hotpot", path: "/hotpot", hasDropdown: true },
-  { label: "Bulk Buy", path: "/bulk-buy" },
-  { label: "Gift Card", path: "/gift-card" },
+  { label: "Home", path: "/" },
+  { label: "About", path: "/about" },
+  { label: "New Arrivals", path: "/new-arrivals" },
+  { label: "Seafood & Sashimi", path: "/seafood", hasDropdown: true },
+  { label: "For Hotpot", path: "/hotpot", hasDropdown: true },
+
 ];
 
 export default function Header() {
@@ -15,7 +15,7 @@ export default function Header() {
     <header className="site-header">
       <div className="header-inner">
         <Link to="/" className="brand">
-          Imperial Site
+          Imperial Ocean
         </Link>
 
         <nav className="main-nav">
