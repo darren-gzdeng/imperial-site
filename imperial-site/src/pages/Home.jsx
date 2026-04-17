@@ -1,8 +1,8 @@
 export default function Home() {
   return (
     <section>
-      <h1>首页</h1>
-      <p>这是首页内容。</p>
+      <h1>Home</h1>
+      <p>Testing</p>
     </section>
   );
 }
