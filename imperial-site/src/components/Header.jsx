@@ -14,10 +14,28 @@ export default function Header() {
   return (
     <header className="site-header">
       <div className="header-inner">
-        <Link to="/" className="brand">
-          Imperial Ocean
-        </Link>
-
+        <div className="header-top">
+          <div className="brand-wrap">
+            <Link to="/" className="brand">
+              Imperial Ocean Select
+            </Link>
+          </div>
+          <div className="header-actions">
+            <button className="icon-btn" aria-label="Search">
+              <Search size={20} strokeWidth={2} />
+            </button>
+            <Link to="/login" className="icon-btn" aria-label="Account">
+              <User size={20} strokeWidth={2} />
+            </Link>
+            <button className="icon-btn" aria-label="Cart">
+              <ShoppingBag size={20} strokeWidth={2} />
+            </button>
+            <button className="icon-btn" aria-label="Language">
+              <Languages size={20} strokeWidth={2} />
+            </button>
+          </div>
+        </div>
+      <div className="header-bottom">
         <nav className="main-nav">
           {navItems.map((item) => (
             <Link key={item.label} to={item.path} className="nav-item">
@@ -26,21 +44,7 @@ export default function Header() {
             </Link>
           ))}
         </nav>
-
-        <div className="header-actions">
-          <button className="icon-btn" aria-label="Search">
-            <Search size={18} strokeWidth={2} />
-          </button>
-          <Link to="/login" className="icon-btn" aria-label="Account">
-            <User size={18} strokeWidth={2} />
-          </Link>
-          <button className="icon-btn" aria-label="Cart">
-            <ShoppingBag size={18} strokeWidth={2} />
-          </button>
-          <button className="icon-btn" aria-label="Language">
-            <Languages size={18} strokeWidth={2} />
-          </button>
-        </div>
+      </div>
       </div>
     </header>
   );
