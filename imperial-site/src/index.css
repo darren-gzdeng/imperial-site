@@ -108,7 +108,7 @@ a {
   transition: color 0.2s ease;
   white-space: nowrap;
 }
-
+ 
 .nav-item:hover {
   color: #C5BA99;
 }
