@@ -36,7 +36,7 @@ a {
   padding: 18px 24px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 30px;
 }
 
 .header-top,
@@ -59,9 +59,9 @@ a {
 
 .brand {
   font-family: "Cormorant Garamond", Georgia, serif;
-  font-size: 1.5rem;
-  font-weight: 600;
-  letter-spacing: 0.2px;
+  font-size: 1.4rem;
+  font-weight: 500;
+  letter-spacing: 0.3px;
   color: rgb(243, 243, 243);
   white-space: nowrap;
 }
@@ -92,7 +92,7 @@ a {
 .main-nav {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 30px;
   flex-wrap: wrap;
   justify-content: flex-start;
 }
@@ -100,17 +100,17 @@ a {
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 5px;
   font-family: "Inter", sans-serif;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 300;
-  color: C5BA99;
+  color: #C5BA99;
   transition: color 0.2s ease;
   white-space: nowrap;
 }
 
 .nav-item:hover {
-  color: C5BA99;
+  color: #C5BA99;
 }
 
 .header-actions {
@@ -182,7 +182,7 @@ h1 {
     width: 100%;
     flex-wrap: wrap;
     justify-content: center;
-    gap: 14px 18px;
+    gap: 16px;
   }
 
   .header-actions {
