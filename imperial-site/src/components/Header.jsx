@@ -31,9 +31,9 @@ export default function Header() {
           <button className="icon-btn" aria-label="Search">
             <Search size={18} strokeWidth={2} />
           </button>
-          <button className="icon-btn" aria-label="Account">
+          <Link to="/login" className="icon-btn" aria-label="Account">
             <User size={18} strokeWidth={2} />
-          </button>
+          </Link>
           <button className="icon-btn" aria-label="Cart">
             <ShoppingBag size={18} strokeWidth={2} />
           </button>
