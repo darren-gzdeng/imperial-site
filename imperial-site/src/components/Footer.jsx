@@ -17,7 +17,6 @@ export default function Footer() {
           </div>
           <div className="footer-column">
             <p className="footer-title">POLICIES</p>
-            <a href="#" className="footer-link">Refund Policy</a>
             <a href="#" className="footer-link">Shipping & Delivery</a>
             <a href="#" className="footer-link">Privacy Policy</a>
             <a href="#" className="footer-link">Terms of Service</a>
