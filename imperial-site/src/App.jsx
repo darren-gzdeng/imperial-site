@@ -7,6 +7,10 @@ import Contact from "./pages/Contact";
 import NewArrivals from "./pages/NewArrivals";
 import Seafood from "./pages/Seafood";
 import Hotpot from "./pages/Hotpot";
+import ChefRecipe from "./pages/ChefRecipe";
+import ShippingDelivery from "./pages/ShippingDelivery";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
+import TermsOfService from "./pages/TermsOfService";
 import Login from "./pages/Login"; // 👈 IMPORTANT
 
 export default function App() {
@@ -23,6 +27,10 @@ export default function App() {
         <Route path="new-arrivals" element={<NewArrivals />} />
         <Route path="seafood" element={<Seafood />} />
         <Route path="hotpot" element={<Hotpot />} />
+        <Route path="chef-recipe" element={<ChefRecipe />} />
+        <Route path="shipping-delivery" element={<ShippingDelivery />} />
+        <Route path="privacy-policy" element={<PrivacyPolicy />} />
+        <Route path="terms-of-service" element={<TermsOfService />} />
       </Route>
     </Routes>
   );

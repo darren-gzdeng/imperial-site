@@ -8,7 +8,7 @@ export default function Footer() {
           <div className="footer-column">
             <p className="footer-title">MORE ON IMPERIAL OCEAN</p>
             <Link to="/about" className="footer-link">About Us</Link>
-            <Link to="/new-arrivals" className="footer-link">Chef&apos;s Recipe</Link>
+            <Link to="/chef-recipe" className="footer-link">Chef&apos;s Recipe</Link>
             <Link to="/seafood" className="footer-link">Imperial Seafood Guide</Link>
           </div>
           <div className="footer-column">
@@ -17,9 +17,9 @@ export default function Footer() {
           </div>
           <div className="footer-column">
             <p className="footer-title">POLICIES</p>
-            <a href="#" className="footer-link">Shipping & Delivery</a>
-            <a href="#" className="footer-link">Privacy Policy</a>
-            <a href="#" className="footer-link">Terms of Service</a>
+            <Link to="/shipping-delivery" className="footer-link">Shipping & Delivery</Link>
+            <Link to="/privacy-policy" className="footer-link">Privacy Policy</Link>
+            <Link to="/terms-of-service" className="footer-link">Terms of Service</Link>
           </div>
         </div>
         <div className="footer-bottom">
