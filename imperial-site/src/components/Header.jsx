@@ -7,7 +7,7 @@ const navItems = [
   { label: "New Arrivals", path: "/new-arrivals" },
   { label: "Seafood & Sashimi", path: "/seafood", hasDropdown: true },
   { label: "For Hotpot", path: "/hotpot", hasDropdown: true },
-
+  { label: "Contact Us", path: "/contact", hasDropdown: false },
 ];
 
 export default function Header() {
