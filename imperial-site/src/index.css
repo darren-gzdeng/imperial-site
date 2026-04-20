@@ -1,13 +1,22 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Inter:wght@400;500;600&display=swap');
+
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
 }
 
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
 body {
   font-family: Arial, sans-serif;
-  background: #f5f7fb;
+  background: white;
   color: #222;
+  min-height: 100%;
 }
 
 a {
@@ -16,57 +25,51 @@ a {
 }
 
 .site-header {
-  background: #111111;
+  background: rgb(25, 25, 25);
   color: white;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .header-inner {
-  max-width: 1440px;
+  max-width: 1200px;
   margin: 0 auto;
-  height: 84px;
-  padding: 0 32px;
+  padding: 18px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+}
+
+.header-top,
+.header-bottom {
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 32px;
+  gap: 16px;
+}
+
+.header-bottom {
+  padding-top: 4px;
+}
+
+.brand-wrap {
+  display: flex;
+  align-items: center;
 }
 
 .brand {
-  font-size: 2rem;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 1.4rem;
   font-weight: 500;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.3px;
+  color: rgb(243, 243, 243);
   white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.main-nav {
-  display: flex;
-  align-items: center;
-  gap: 28px;
-  flex: 1;
-  justify-content: center;
-}
-
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 0.95rem;
-  color: rgba(255, 255, 255, 0.88);
-  transition: color 0.2s ease;
-  white-space: nowrap;
-}
-
-.nav-item:hover {
-  color: white;
 }
 
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 14px;
-  flex-shrink: 0;
+  gap: 18px;
 }
 
 .icon-btn {
@@ -77,19 +80,74 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 4px;
+  padding: 6px;
   transition: color 0.2s ease, transform 0.2s ease;
 }
 
 .icon-btn:hover {
-  color: white;
+  color: #f8fafc;
   transform: translateY(-1px);
+}
+
+.main-nav {
+  display: flex;
+  align-items: center;
+  gap: 30px;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: "Inter", sans-serif;
+  font-size: 0.85rem;
+  font-weight: 300;
+  color: #C5BA99;
+  transition: color 0.2s ease;
+  white-space: nowrap;
+}
+ 
+.nav-item:hover {
+  color: #C5BA99;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.icon-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  transition: color 0.2s ease, transform 0.2s ease;
+}
+
+.icon-btn:hover {
+  color: #f8fafc;
+  transform: translateY(-1px);
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 .page-container {
   max-width: 1200px;
+  width: 100%;
   margin: 0 auto;
   padding: 48px 24px;
+  flex: 1;
 }
 
 h1 {
@@ -124,10 +182,92 @@ h1 {
     width: 100%;
     flex-wrap: wrap;
     justify-content: center;
-    gap: 14px 18px;
+    gap: 16px;
   }
 
   .header-actions {
     order: 2;
+  }
+}
+
+.site-footer {
+  background: #080808;
+  color: rgba(255, 255, 255, 0.92);
+  padding: 56px 24px 32px;
+}
+
+.footer-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.footer-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 40px;
+  margin-bottom: 32px;
+}
+
+.footer-column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.footer-title {
+  font-size: 0.95rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.92);
+  margin-bottom: 12px;
+}
+
+.footer-link {
+  color: rgba(255, 255, 255, 0.72);
+  transition: color 0.2s ease;
+}
+
+.footer-link:hover {
+  color: white;
+}
+
+.footer-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 24px;
+}
+
+.footer-social {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.social-link {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.95rem;
+}
+
+.social-link:hover {
+  color: white;
+}
+
+.footer-copy {
+  color: rgba(255, 255, 255, 0.56);
+  font-size: 0.92rem;
+}
+
+@media (max-width: 800px) {
+  .footer-grid {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+
+  .footer-bottom {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

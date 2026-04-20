@@ -1,9 +1,9 @@
 export default function Home() {
   const products = [
-    { name: "King Crab Legs", price: "On Enquiry", image: "/images/king-crab.jpg" },
-    { name: "Snow Crab Legs", price: "On Enquiry", image: "/images/snow-crab.jpg" },
-    { name: "Tuna Toro", price: "On Enquiry", image: "/images/tuna-toro.jpg" },
-    { name: "Squid", price: "On Enquiry", image: "/images/squid.jpg" },
+    { name: "King Crab Legs", price: "On Enquiry", image: "images/king_crab.png" },
+    { name: "Snow Crab Legs", price: "On Enquiry", image: "images/snow-crab.svg" },
+    { name: "Tuna Toro", price: "On Enquiry", image: "images/tuna-toro.svg" },
+    { name: "Squid", price: "On Enquiry", image: "images/squid.svg" },
   ];
 
   return (
@@ -20,6 +20,9 @@ export default function Home() {
           </div>
         ))}
       </div>
+      
     </section>
+    
   );
+  
 }
