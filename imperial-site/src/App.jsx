@@ -7,17 +7,19 @@ import Contact from "./pages/Contact";
 import NewArrivals from "./pages/NewArrivals";
 import Seafood from "./pages/Seafood";
 import Hotpot from "./pages/Hotpot";
+import Login from "./pages/Login";
+import Register from "./pages/Register";
 import ChefRecipe from "./pages/ChefRecipe";
 import ShippingDelivery from "./pages/ShippingDelivery";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
-import Login from "./pages/Login"; // 👈 IMPORTANT
 
 export default function App() {
   return (
     <Routes>
       {/* Login page outside layout */}
       <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
 
       {/* Main layout pages */}
       <Route element={<MainLayout />}>
