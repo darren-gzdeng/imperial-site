@@ -7,13 +7,15 @@ import Contact from "./pages/Contact";
 import NewArrivals from "./pages/NewArrivals";
 import Seafood from "./pages/Seafood";
 import Hotpot from "./pages/Hotpot";
-import Login from "./pages/Login"; // 👈 IMPORTANT
+import Login from "./pages/Login";
+import Register from "./pages/Register";
 
 export default function App() {
   return (
     <Routes>
       {/* Login page outside layout */}
       <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
 
       {/* Main layout pages */}
       <Route element={<MainLayout />}>

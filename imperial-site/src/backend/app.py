@@ -4,8 +4,10 @@ import hashlib
 import jwt
 import datetime
 from functools import wraps
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 app.config['SECRET_KEY'] = 'super_secret_key'
 
 # -------------------------

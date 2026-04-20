@@ -1,0 +1,3 @@
+Flask==3.x.x
+PyJWT==2.x.x
+Flask-CORS==4.x.x
