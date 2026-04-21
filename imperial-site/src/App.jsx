@@ -17,10 +17,6 @@ import TermsOfService from "./pages/TermsOfService";
 export default function App() {
   return (
     <Routes>
-      {/* Login page outside layout */}
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
-
       {/* Main layout pages */}
       <Route element={<MainLayout />}>
         <Route index element={<Home />} />
@@ -29,6 +25,8 @@ export default function App() {
         <Route path="new-arrivals" element={<NewArrivals />} />
         <Route path="seafood" element={<Seafood />} />
         <Route path="hotpot" element={<Hotpot />} />
+        <Route path="login" element={<Login />} />
+        <Route path="register" element={<Register />} />
         <Route path="chef-recipe" element={<ChefRecipe />} />
         <Route path="shipping-delivery" element={<ShippingDelivery />} />
         <Route path="privacy-policy" element={<PrivacyPolicy />} />

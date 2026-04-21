@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+import os
 import sqlite3
 import hashlib
 import jwt
@@ -10,11 +11,19 @@ app = Flask(__name__)
 CORS(app)
 app.config['SECRET_KEY'] = 'super_secret_key'
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "users.db")
+
 # -------------------------
 # Database helper
 # -------------------------
 def get_db():
-    return sqlite3.connect("users.db")
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA cache_size=1000")
+    conn.execute("PRAGMA temp_store=MEMORY")
+    return conn
 
 
 # -------------------------
@@ -67,11 +76,11 @@ def register():
             (email, hash_password(password))
         )
         conn.commit()
+        return jsonify({"message": "User registered successfully"})
     except sqlite3.IntegrityError:
         return jsonify({"error": "User already exists"}), 400
-
-    conn.close()
-    return jsonify({"message": "User registered successfully"})
+    finally:
+        conn.close()
 
 
 # -------------------------
@@ -87,23 +96,25 @@ def login():
     conn = get_db()
     cursor = conn.cursor()
 
-    cursor.execute(
-        "SELECT * FROM users WHERE email=? AND password=?",
-        (email, hash_password(password))
-    )
+    try:
+        cursor.execute(
+            "SELECT * FROM users WHERE email=? AND password=?",
+            (email, hash_password(password))
+        )
 
-    user = cursor.fetchone()
-    conn.close()
+        user = cursor.fetchone()
 
-    if not user:
-        return jsonify({"error": "Invalid credentials"}), 401
+        if not user:
+            return jsonify({"error": "Invalid credentials"}), 401
 
-    token = jwt.encode({
-        "user_id": user[0],
-        "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1)
-    }, app.config['SECRET_KEY'], algorithm="HS256")
+        token = jwt.encode({
+            "user_id": user[0],
+            "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1)
+        }, app.config['SECRET_KEY'], algorithm="HS256")
 
-    return jsonify({"token": token})
+        return jsonify({"token": token})
+    finally:
+        conn.close()
 
 
 # -------------------------
