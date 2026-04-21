@@ -34,7 +34,7 @@ export default function Register() {
   };
 
   return (
-    <div style={{ maxWidth: "400px", margin: "100px auto", textAlign: "center" }}>
+    <div style={{ maxWidth: "400px", margin: "50px auto", textAlign: "center", padding: "20px" }}>
       <h2>Register</h2>
 
       <form onSubmit={handleRegister} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
@@ -54,10 +54,21 @@ export default function Register() {
           style={{ padding: "10px" }}
         />
 
-        <button type="submit">Create Account</button>
+        <button
+          type="submit"
+          style={{
+            background: "#1e40af",
+            color: "white",
+            padding: "10px",
+            border: "none",
+            borderRadius: "5px",
+          }}
+        >
+          Create Account
+        </button>
       </form>
 
-      <p>{message}</p>
+      <p style={{ marginTop: "15px" }}>{message}</p>
     </div>
   );
 }
