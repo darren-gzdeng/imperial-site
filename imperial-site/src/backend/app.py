@@ -6,6 +6,8 @@ import jwt
 import datetime
 from functools import wraps
 from flask_cors import CORS
+from google.auth.transport import requests
+from google.oauth2 import id_token
 
 app = Flask(__name__)
 CORS(app)
@@ -115,6 +117,64 @@ def login():
         return jsonify({"token": token})
     finally:
         conn.close()
+
+
+# -------------------------
+# Google Login
+# -------------------------
+@app.route('/google-login', methods=['POST'])
+def google_login():
+    data = request.json
+    token = data.get("token")
+
+    if not token:
+        return jsonify({"error": "Missing token"}), 400
+
+    try:
+        # Verify the Google token
+        idinfo = id_token.verify_oauth2_token(
+            token, 
+            requests.Request(), 
+            "573360926782-a3pfuc99v6r1tbpk70gj5ru3cip4rl4s.apps.googleusercontent.com"
+        )
+
+        email = idinfo.get('email')
+        name = idinfo.get('name', '')
+
+        if not email:
+            return jsonify({"error": "Could not get email from Google"}), 400
+
+        conn = get_db()
+        cursor = conn.cursor()
+
+        try:
+            # Check if user exists
+            cursor.execute("SELECT * FROM users WHERE email=?", (email,))
+            user = cursor.fetchone()
+
+            if not user:
+                # Create new user with Google login (use email as password placeholder)
+                cursor.execute(
+                    "INSERT INTO users (email, password) VALUES (?, ?)",
+                    (email, hash_password(email + "_google"))
+                )
+                conn.commit()
+                cursor.execute("SELECT * FROM users WHERE email=?", (email,))
+                user = cursor.fetchone()
+
+            # Generate JWT token
+            auth_token = jwt.encode({
+                "user_id": user[0],
+                "email": email,
+                "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1)
+            }, app.config['SECRET_KEY'], algorithm="HS256")
+
+            return jsonify({"token": auth_token})
+        finally:
+            conn.close()
+
+    except ValueError:
+        return jsonify({"error": "Invalid token"}), 401
 
 
 # -------------------------

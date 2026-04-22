@@ -9,6 +9,7 @@ import Seafood from "./pages/Seafood";
 import Hotpot from "./pages/Hotpot";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import Account from "./pages/Account";
 import ChefRecipe from "./pages/ChefRecipe";
 import ShippingDelivery from "./pages/ShippingDelivery";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
@@ -27,6 +28,7 @@ export default function App() {
         <Route path="hotpot" element={<Hotpot />} />
         <Route path="login" element={<Login />} />
         <Route path="register" element={<Register />} />
+        <Route path="account" element={<Account />} />
         <Route path="chef-recipe" element={<ChefRecipe />} />
         <Route path="shipping-delivery" element={<ShippingDelivery />} />
         <Route path="privacy-policy" element={<PrivacyPolicy />} />

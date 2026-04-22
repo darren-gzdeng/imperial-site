@@ -1,9 +1,22 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    if (window.google) {
+      window.google.accounts.id.initialize({
+        client_id: "573360926782-a3pfuc99v6r1tbpk70gj5ru3cip4rl4s.apps.googleusercontent.com",
+        callback: handleGoogleLogin,
+      });
+      window.google.accounts.id.renderButton(
+        document.getElementById("google_signin_button"),
+        { theme: "outline", size: "large" }
+      );
+    }
+  }, []);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -24,6 +37,30 @@ export default function Login() {
         localStorage.setItem("token", data.token);
       } else {
         setMessage(data.error || "Login failed ❌");
+      }
+    } catch (err) {
+      setMessage("Server error ❌");
+    }
+  };
+
+  const handleGoogleLogin = async (credentialResponse) => {
+    try {
+      const res = await fetch("http://127.0.0.1:5000/google-login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ token: credentialResponse.credential }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        setMessage("Google login successful ✔");
+        localStorage.setItem("token", data.token);
+        setTimeout(() => window.location.href = "/imperial-site/", 1000);
+      } else {
+        setMessage(data.error || "Google login failed ❌");
       }
     } catch (err) {
       setMessage("Server error ❌");
@@ -64,6 +101,10 @@ export default function Login() {
           Login
         </button>
       </form>
+
+      <div style={{ margin: "20px 0", textAlign: "center" }}>
+        <div id="google_signin_button" style={{ display: "flex", justifyContent: "center" }}></div>
+      </div>
 
       <p style={{ marginTop: "15px" }}>
         <a href="/imperial-site/register" style={{ textDecoration: "underline", color: "#1e40af" }}>
