@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Link } from "react-router";
 import { Search, User, ShoppingBag, Languages, ChevronDown } from "lucide-react";
 
@@ -11,6 +12,15 @@ const navItems = [
 ];
 
 export default function Header() {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    setIsLoggedIn(!!token);
+  }, []);
+
+  const accountPath = isLoggedIn ? "/account" : "/login";
+
   return (
     <header className="site-header">
       <div className="header-inner">
@@ -24,7 +34,7 @@ export default function Header() {
             <button className="icon-btn" aria-label="Search">
               <Search size={20} strokeWidth={2} />
             </button>
-            <Link to="/login" className="icon-btn" aria-label="Account">
+            <Link to={accountPath} className="icon-btn" aria-label="Account">
               <User size={20} strokeWidth={2} />
             </Link>
             <button className="icon-btn" aria-label="Cart">

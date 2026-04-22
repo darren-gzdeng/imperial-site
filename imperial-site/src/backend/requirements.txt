@@ -1,3 +1,6 @@
 Flask==3.x.x
 PyJWT==2.x.x
 Flask-CORS==4.x.x
+google-auth==2.x.x
+google-auth-oauthlib==1.x.x
+reportlab==4.x.x
