@@ -1,8 +1,157 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
+import { LogOut } from "lucide-react";
+import heroImage from "../assets/hero.png";
+
+const styles = {
+  page: {
+    maxWidth: "1500px",
+    margin: "0 auto",
+    padding: "56px 72px 80px",
+    color: "#1b1d22",
+    background: "#ffffff",
+  },
+  title: {
+    margin: 0,
+    fontSize: "4.5rem",
+    fontWeight: 400,
+    letterSpacing: "-0.06em",
+    lineHeight: 1,
+  },
+  logoutButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "14px",
+    marginTop: "34px",
+    padding: 0,
+    background: "transparent",
+    border: "none",
+    color: "#3b3d42",
+    fontSize: "1.05rem",
+    cursor: "pointer",
+    textDecoration: "underline",
+    textUnderlineOffset: "6px",
+  },
+  heroSection: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) 560px",
+    gap: "52px",
+    alignItems: "center",
+    marginTop: "48px",
+    marginBottom: "88px",
+  },
+  passTitleRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "14px",
+    flexWrap: "wrap",
+    marginBottom: "26px",
+  },
+  passTitle: {
+    margin: 0,
+    fontSize: "2.1rem",
+    fontWeight: 400,
+    letterSpacing: "-0.04em",
+  },
+  badge: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "6px 16px",
+    borderRadius: "999px",
+    background: "#555555",
+    color: "#ffffff",
+    fontSize: "1rem",
+    fontWeight: 600,
+  },
+  leadText: {
+    margin: "0 0 16px",
+    color: "#595d63",
+    fontSize: "1.12rem",
+    lineHeight: 1.55,
+  },
+  balanceText: {
+    margin: "0 0 32px",
+    color: "#595d63",
+    fontSize: "1.12rem",
+    lineHeight: 1.55,
+  },
+  balanceStrong: {
+    color: "#2e3136",
+    fontWeight: 700,
+  },
+  buttonRow: {
+    display: "flex",
+    gap: "14px",
+    flexWrap: "wrap",
+    marginBottom: "20px",
+  },
+  primaryButton: {
+    minWidth: "246px",
+    padding: "22px 28px",
+    border: "none",
+    borderRadius: "20px",
+    background: "#7fa8df",
+    color: "#ffffff",
+    fontSize: "1rem",
+    fontWeight: 500,
+    letterSpacing: "0.06em",
+    cursor: "pointer",
+  },
+  wideButton: {
+    minWidth: "512px",
+  },
+  imageCard: {
+    position: "relative",
+    overflow: "hidden",
+    borderRadius: "18px",
+    minHeight: "262px",
+    boxShadow: "0 18px 40px rgba(22, 33, 61, 0.12)",
+  },
+  image: {
+    display: "block",
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+  },
+  imageOverlay: {
+    position: "absolute",
+    top: "34%",
+    left: "18%",
+    padding: "18px 34px",
+    borderRadius: "26px",
+    background: "#7fa8df",
+    color: "#ffffff",
+    fontSize: "1.05rem",
+    fontWeight: 600,
+    textAlign: "center",
+    lineHeight: 1.35,
+    letterSpacing: "0.04em",
+  },
+  section: {
+    marginBottom: "78px",
+  },
+  sectionTitle: {
+    margin: "0 0 24px",
+    fontSize: "2.1rem",
+    fontWeight: 400,
+    letterSpacing: "-0.04em",
+  },
+  sectionText: {
+    margin: 0,
+    color: "#595d63",
+    fontSize: "1.12rem",
+    lineHeight: 1.6,
+  },
+  detailValue: {
+    margin: "0 0 14px",
+    color: "#595d63",
+    fontSize: "1.12rem",
+    lineHeight: 1.6,
+  },
+};
 
 export default function Account() {
   const [user, setUser] = useState(null);
-  const [activeTab, setActiveTab] = useState("details");
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -10,12 +159,14 @@ export default function Account() {
       window.location.href = "/imperial-site/login";
       return;
     }
-    
+
     setUser({
       email: "user@example.com",
       name: "John Doe",
       address: "123 Main St, City, State 12345",
       phone: "+1 (555) 123-4567",
+      country: "Australia",
+      creditBalance: 0,
     });
   }, []);
 
@@ -24,130 +175,74 @@ export default function Account() {
     window.location.href = "/imperial-site/";
   };
 
+  const handlePlaceholderAction = () => {
+    alert("This action is not set up yet.");
+  };
+
   if (!user) {
     return <div style={{ textAlign: "center", padding: "50px" }}>Loading...</div>;
   }
 
   return (
-    <div style={{ maxWidth: "800px", margin: "50px auto", padding: "20px" }}>
-      <h2>My Account</h2>
+    <div style={styles.page}>
+      <h1 style={styles.title}>Account</h1>
 
-      <div style={{ display: "flex", gap: "20px", marginTop: "30px" }}>
-        <div style={{ width: "200px" }}>
-          <button
-            onClick={() => setActiveTab("details")}
-            style={{
-              display: "block",
-              width: "100%",
-              padding: "10px",
-              margin: "10px 0",
-              background: activeTab === "details" ? "#1e40af" : "#f0f0f0",
-              color: activeTab === "details" ? "white" : "black",
-              border: "none",
-              borderRadius: "5px",
-              cursor: "pointer",
-            }}
-          >
-            Account Details
-          </button>
-          <button
-            onClick={() => setActiveTab("address")}
-            style={{
-              display: "block",
-              width: "100%",
-              padding: "10px",
-              margin: "10px 0",
-              background: activeTab === "address" ? "#1e40af" : "#f0f0f0",
-              color: activeTab === "address" ? "white" : "black",
-              border: "none",
-              borderRadius: "5px",
-              cursor: "pointer",
-            }}
-          >
-            Address
-          </button>
-          <button
-            onClick={() => setActiveTab("orders")}
-            style={{
-              display: "block",
-              width: "100%",
-              padding: "10px",
-              margin: "10px 0",
-              background: activeTab === "orders" ? "#1e40af" : "#f0f0f0",
-              color: activeTab === "orders" ? "white" : "black",
-              border: "none",
-              borderRadius: "5px",
-              cursor: "pointer",
-            }}
-          >
-            Order History
-          </button>
-          <button
-            onClick={handleLogout}
-            style={{
-              display: "block",
-              width: "100%",
-              padding: "10px",
-              margin: "10px 0",
-              background: "#dc2626",
-              color: "white",
-              border: "none",
-              borderRadius: "5px",
-              cursor: "pointer",
-            }}
-          >
-            Logout
+      <button onClick={handleLogout} style={styles.logoutButton}>
+        <LogOut size={22} strokeWidth={1.7} />
+        <span>Log out</span>
+      </button>
+
+      <section style={styles.heroSection}>
+        <div>
+          <div style={styles.passTitleRow}>
+            <h2 style={styles.passTitle}>Imperial Pass</h2>
+            <span style={styles.badge}>Inactive</span>
+          </div>
+
+          <p style={styles.leadText}>Your account: {user.email}</p>
+          <p style={styles.balanceText}>
+            Your credit balance: <span style={styles.balanceStrong}>£{user.creditBalance.toFixed(2)}</span>
+          </p>
+
+          <div style={styles.buttonRow}>
+            <button onClick={handlePlaceholderAction} style={styles.primaryButton}>
+              Top Up
+            </button>
+            <button
+              onClick={handlePlaceholderAction}
+              style={{ ...styles.primaryButton, ...styles.wideButton }}
+            >
+              Explore Celebrate Pass Sale
+            </button>
+          </div>
+
+          <button onClick={handlePlaceholderAction} style={styles.primaryButton}>
+            Continue Checkout
           </button>
         </div>
 
-        <div style={{ flex: 1 }}>
-          {activeTab === "details" && (
-            <div>
-              <h3>Account Details</h3>
-              <div style={{ marginTop: "20px" }}>
-                <p><strong>Name:</strong> {user.name}</p>
-                <p><strong>Email:</strong> {user.email}</p>
-                <p><strong>Phone:</strong> {user.phone}</p>
-              </div>
-            </div>
-          )}
-
-          {activeTab === "address" && (
-            <div>
-              <h3>Delivery Address</h3>
-              <div style={{ marginTop: "20px", border: "1px solid #ccc", padding: "15px", borderRadius: "5px" }}>
-                <p>{user.address}</p>
-                <button style={{ marginTop: "15px", padding: "10px 15px", background: "#1e40af", color: "white", border: "none", borderRadius: "5px", cursor: "pointer" }}>
-                  Edit Address
-                </button>
-              </div>
-            </div>
-          )}
-
-          {activeTab === "orders" && (
-            <div>
-              <h3>Order History</h3>
-              <div style={{ marginTop: "20px" }}>
-                <div style={{ border: "1px solid #ccc", padding: "15px", borderRadius: "5px", marginBottom: "15px" }}>
-                  <p><strong>Order #1001</strong> - King Crab Legs (2 lbs)</p>
-                  <p>Date: April 15, 2026</p>
-                  <p>Status: Delivered</p>
-                </div>
-                <div style={{ border: "1px solid #ccc", padding: "15px", borderRadius: "5px", marginBottom: "15px" }}>
-                  <p><strong>Order #1002</strong> - Tuna Toro (1 lb)</p>
-                  <p>Date: April 10, 2026</p>
-                  <p>Status: Delivered</p>
-                </div>
-                <div style={{ border: "1px solid #ccc", padding: "15px", borderRadius: "5px" }}>
-                  <p><strong>Order #1003</strong> - Snow Crab Legs (3 lbs)</p>
-                  <p>Date: April 5, 2026</p>
-                  <p>Status: Delivered</p>
-                </div>
-              </div>
-            </div>
-          )}
+        <div style={styles.imageCard}>
+          <img src={heroImage} alt="Celebrate pass promotion" style={styles.image} />
+          <div style={styles.imageOverlay}>
+            Refer a Friend,
+            <br />
+            Double the Celebration!
+          </div>
         </div>
-      </div>
+      </section>
+
+      <section style={styles.section}>
+        <h2 style={styles.sectionTitle}>Order history</h2>
+        <p style={styles.sectionText}>You haven&apos;t placed any orders yet.</p>
+      </section>
+
+      <section style={styles.section}>
+        <h2 style={styles.sectionTitle}>Account details</h2>
+        <p style={styles.detailValue}>{user.country}</p>
+        <p style={styles.detailValue}>{user.name}</p>
+        <p style={styles.detailValue}>{user.phone}</p>
+        <p style={styles.detailValue}>{user.address}</p>
+      </section>
     </div>
   );
 }
