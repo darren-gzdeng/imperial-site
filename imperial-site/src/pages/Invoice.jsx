@@ -1,17 +1,52 @@
 import { useState, useEffect } from "react";
 
-export default function Invoice() {
-  const [invoices, setInvoices] = useState([]);
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [formData, setFormData] = useState({
-    invoice_number: "",
+const formatDateInput = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const addDays = (date, days) => {
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + days);
+  return nextDate;
+};
+
+const generateInvoiceNumber = (invoices, date = new Date()) => {
+  const year = String(date.getFullYear()).slice(-2);
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const period = `${year}${month}`;
+
+  const suffixes = invoices
+    .map((invoice) => {
+      const match = String(invoice.invoice_number || "").match(new RegExp(`^INV-${period}(\\d{3})$`));
+      return match ? Number(match[1]) : 0;
+    })
+    .filter(Boolean);
+
+  const nextSuffix = String((suffixes.length ? Math.max(...suffixes) : 0) + 1).padStart(3, "0");
+  return `INV-${period}${nextSuffix}`;
+};
+
+const createInitialFormData = (invoices = []) => {
+  const today = new Date();
+  const dueDate = formatDateInput(addDays(today, 7));
+  return {
+    invoice_number: generateInvoiceNumber(invoices, today),
     client_name: "",
     client_email: "",
     client_address: "",
-    issue_date: new Date().toISOString().split("T")[0],
-    due_date: "",
+    issue_date: formatDateInput(today),
+    due_date: dueDate,
     items: [{ description: "", quantity: 1, unit_price: 0, amount: 0 }],
-  });
+  };
+};
+
+export default function Invoice() {
+  const [invoices, setInvoices] = useState([]);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [formData, setFormData] = useState(createInitialFormData());
   const [user_id, setUserId] = useState(null);
 
   useEffect(() => {
@@ -31,6 +66,11 @@ export default function Invoice() {
       const res = await fetch(`http://127.0.0.1:5000/invoices/${userId}`);
       const data = await res.json();
       setInvoices(data);
+      setFormData((prev) =>
+        prev.client_name || prev.client_email || prev.client_address
+          ? prev
+          : createInitialFormData(data)
+      );
     } catch (err) {
       console.error("Failed to fetch invoices:", err);
     }
@@ -61,9 +101,9 @@ export default function Invoice() {
   };
 
   const calculateTotals = () => {
-    const subtotal = formData.items.reduce((sum, item) => sum + (item.amount || 0), 0);
-    const tax = subtotal * 0.1; // 10% tax
-    const total = subtotal + tax;
+    const total = formData.items.reduce((sum, item) => sum + (item.amount || 0), 0);
+    const subtotal = total / 1.1;
+    const tax = total - subtotal;
     return { subtotal, tax, total };
   };
 
@@ -111,15 +151,7 @@ export default function Invoice() {
       if (res.ok) {
         alert("Invoice created successfully!");
         setShowCreateForm(false);
-        setFormData({
-          invoice_number: "",
-          client_name: "",
-          client_email: "",
-          client_address: "",
-          issue_date: new Date().toISOString().split("T")[0],
-          due_date: "",
-          items: [{ description: "", quantity: 1, unit_price: 0, amount: 0 }],
-        });
+        setFormData(createInitialFormData([...invoices, invoiceData]));
         fetchInvoices(user_id);
       } else {
         alert(`Error: ${data.error || "Failed to create invoice"}`);
@@ -142,7 +174,12 @@ export default function Invoice() {
       <h2>Invoices</h2>
 
       <button
-        onClick={() => setShowCreateForm(!showCreateForm)}
+        onClick={() => {
+          if (!showCreateForm) {
+            setFormData(createInitialFormData(invoices));
+          }
+          setShowCreateForm(!showCreateForm);
+        }}
         style={{
           padding: "10px 20px",
           background: "#1e40af",
@@ -164,11 +201,9 @@ export default function Invoice() {
               <input
                 type="text"
                 name="invoice_number"
-                placeholder="Invoice Number"
                 value={formData.invoice_number}
-                onChange={handleInputChange}
-                required
-                style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px" }}
+                readOnly
+                style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: "#f0f0f0", color: "#475569" }}
               />
               <input
                 type="text"
@@ -198,16 +233,14 @@ export default function Invoice() {
                 type="date"
                 name="issue_date"
                 value={formData.issue_date}
-                onChange={handleInputChange}
-                style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px" }}
+                readOnly
+                style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: "#f0f0f0", color: "#475569" }}
               />
               <input
                 type="date"
-                name="due_date"
-                placeholder="Due Date"
                 value={formData.due_date}
-                onChange={handleInputChange}
-                style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px" }}
+                readOnly
+                style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: "#f0f0f0", color: "#475569" }}
               />
             </div>
 
@@ -262,7 +295,7 @@ export default function Invoice() {
 
             <div style={{ marginBottom: "15px", textAlign: "right" }}>
               <p><strong>Subtotal:</strong> ${subtotal.toFixed(2)}</p>
-              <p><strong>Tax (10%):</strong> ${tax.toFixed(2)}</p>
+              <p><strong>GST included (10%):</strong> ${tax.toFixed(2)}</p>
               <p style={{ fontSize: "18px", color: "#1e40af" }}><strong>Total:</strong> ${total.toFixed(2)}</p>
             </div>
 
