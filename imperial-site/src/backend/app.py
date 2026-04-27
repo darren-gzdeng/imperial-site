@@ -482,6 +482,21 @@ def generate_invoice_pdf(invoice_id):
             alignment=1,
             leading=12,
         )
+        bill_to_label_style = ParagraphStyle(
+            'BillToLabel',
+            parent=styles['Normal'],
+            fontName='Helvetica-Bold',
+            fontSize=10,
+            textColor=black,
+            leading=12,
+        )
+        bill_to_name_style = ParagraphStyle(
+            'BillToName',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=black,
+            leading=12,
+        )
         small_label_style = ParagraphStyle(
             'SmallLabel',
             parent=styles['Normal'],
@@ -524,24 +539,52 @@ def generate_invoice_pdf(invoice_id):
             textColor=grey,
             leading=10,
         )
+        advice_value_bold_style = ParagraphStyle(
+            'AdviceValueBold',
+            parent=body_style,
+            fontName='Helvetica-Bold',
+        )
+        totals_label_style = ParagraphStyle(
+            'TotalsLabel',
+            parent=styles['Normal'],
+            fontSize=9.5,
+            textColor=black,
+            alignment=2,
+        )
+        totals_value_style = ParagraphStyle(
+            'TotalsValue',
+            parent=styles['Normal'],
+            fontSize=9.5,
+            textColor=black,
+            alignment=2,
+        )
+        totals_total_label_style = ParagraphStyle(
+            'TotalsTotalLabel',
+            parent=totals_label_style,
+            fontName='Helvetica-Bold',
+        )
+        totals_total_value_style = ParagraphStyle(
+            'TotalsTotalValue',
+            parent=totals_value_style,
+            fontName='Helvetica-Bold',
+        )
 
         items = json.loads(invoice[8])
         issue_date = format_au_date(invoice[6])
         due_date = format_au_date(invoice[7] or invoice[6])
 
-        business_name = "Imperial Restaurant"
+        business_name = "ONE PACIFIC TRADING PTY LTD"
         business_address_lines = [
-            "9 Ford St, Greenacre",
-            "NSW 2190",
-            "02 9713 9988",
+            "4 Gatwood Close",
+            "Padstow Sydney NSW 2211",
         ]
-        business_abn = "33 645 798 447"
+        business_abn = "16 643 396 203"
         eft_lines = [
             "EFT Bank Payments:",
-            "Account Name: Imperial Restaurant",
-            "BSB: 062 128 Account Number: 1122 7625",
-            "Swift Code: CTBAAU2S",
-            "Please use quote or invoice number as ref",
+            "Account Name: ONE PACIFIC TRADING PTY LTD",
+            "BSB: 633 000",
+            "Account Number: 2149 1026 7",
+            "Please Use Quote Or Invoice number As Ref",
         ]
 
         top_spacer = Table([[""]], colWidths=[7.5 * inch], rowHeights=[0.35 * inch])
@@ -555,7 +598,7 @@ def generate_invoice_pdf(invoice_id):
 
         left_header = Table([
             [Paragraph("TAX INVOICE", title_style)],
-            [Paragraph(invoice[3], company_under_title_style)],
+            [Paragraph("", company_under_title_style)],
         ], colWidths=[3.9 * inch])
         left_header.setStyle(TableStyle([
             ('LEFTPADDING', (0, 0), (-1, -1), 0),
@@ -608,29 +651,48 @@ def generate_invoice_pdf(invoice_id):
             ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
         ]))
         elements.append(header_table)
-        elements.append(Spacer(1, 0.22 * inch))
+
+        bill_to_table = Table([
+            [Paragraph("Bill To:", bill_to_label_style)],
+            [Paragraph(invoice[3], bill_to_name_style)],
+        ], colWidths=[3.9 * inch], hAlign='LEFT')
+        bill_to_table.setStyle(TableStyle([
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        bill_to_row = Table([[bill_to_table, ""]], colWidths=[3.95 * inch, 3.05 * inch])
+        bill_to_row.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        elements.append(bill_to_row)
+        elements.append(Spacer(1, 1.25 * inch))
 
         table_data = [["Description", "Quantity", "Unit Price", "GST", "Amount AUD"]]
         for item in items:
             table_data.append([
                 item.get("description", ""),
-                f"{float(item.get('quantity', 0)):.2f}",
-                f"{float(item.get('unit_price', 0)):.2f}",
+                f"{float(item.get('quantity', 0)):.2f}kg",
+                f"{float(item.get('unit_price', 0)):.2f}/kg",
                 "10%",
                 f"{float(item.get('amount', 0)):.2f}",
             ])
 
-        items_table = Table(table_data, colWidths=[3.9 * inch, 0.95 * inch, 0.95 * inch, 0.65 * inch, 1.05 * inch])
+        items_table = Table(table_data, colWidths=[4.0 * inch, 0.85 * inch, 0.9 * inch, 0.55 * inch, 1.2 * inch])
         items_table.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, -1), 9),
             ('TEXTCOLOR', (0, 0), (-1, -1), black),
             ('LINEBELOW', (0, 0), (-1, 0), 1, black),
             ('LINEBELOW', (0, 1), (-1, -1), 0.35, light_line),
-            ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (4, 1), (4, -1), 'RIGHT'),
-            ('ALIGN', (2, 1), (3, -1), 'RIGHT'),
+            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
             ('LEFTPADDING', (0, 0), (-1, -1), 3),
             ('RIGHTPADDING', (0, 0), (-1, -1), 3),
             ('TOPPADDING', (0, 0), (-1, -1), 4),
@@ -640,17 +702,13 @@ def generate_invoice_pdf(invoice_id):
         elements.append(Spacer(1, 0.04 * inch))
 
         totals_rows = [
-            ["Subtotal", f"{float(invoice[9]):.2f}"],
-            ["TOTAL GST 10%", f"{float(invoice[10]):.2f}"],
-            ["TOTAL AUD", f"{float(invoice[11]):.2f}"],
+            [Paragraph("Subtotal", totals_label_style), Paragraph(f"{float(invoice[9]):.2f}", totals_value_style)],
+            [Paragraph("TOTAL GST 10%", totals_label_style), Paragraph(f"{float(invoice[10]):.2f}", totals_value_style)],
+            [Paragraph("TOTAL AUD", totals_total_label_style), Paragraph(f"{float(invoice[11]):.2f}", totals_total_value_style)],
         ]
-        totals_table = Table(totals_rows, colWidths=[1.55 * inch, 0.95 * inch])
+        totals_table = Table(totals_rows, colWidths=[1.3 * inch, 1.2 * inch])
         totals_table.setStyle(TableStyle([
             ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
-            ('FONTNAME', (0, 0), (-1, -2), 'Helvetica'),
-            ('FONTNAME', (0, 2), (-1, 2), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9.5),
-            ('LINEABOVE', (0, 0), (-1, 0), 1, black),
             ('LINEABOVE', (0, 2), (-1, 2), 1, black),
             ('TOPPADDING', (0, 0), (-1, -1), 4),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
@@ -671,7 +729,7 @@ def generate_invoice_pdf(invoice_id):
 
         bank_details_lines = [Paragraph(f"Due Date: {due_date}", body_bold_style)]
         bank_details_lines.extend(Paragraph(line_text, body_style) for line_text in eft_lines)
-        bank_details = Table([[line] for line in bank_details_lines], colWidths=[3.85 * inch])
+        bank_details = Table([[line] for line in bank_details_lines], colWidths=[7.5 * inch], hAlign='LEFT')
         bank_details.setStyle(TableStyle([
             ('LEFTPADDING', (0, 0), (-1, -1), 0),
             ('RIGHTPADDING', (0, 0), (-1, -1), 0),
@@ -679,28 +737,17 @@ def generate_invoice_pdf(invoice_id):
             ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
         ]))
         elements.append(bank_details)
-        elements.append(Spacer(1, 0.55 * inch))
+        elements.append(Spacer(1, 1.7 * inch))
 
-        advice_dash = Table([["- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"]], colWidths=[7.5 * inch])
+        advice_dash = Table([[""]], colWidths=[7.5 * inch], rowHeights=[0.08 * inch])
         advice_dash.setStyle(TableStyle([
-            ('TEXTCOLOR', (0, 0), (-1, -1), grey),
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 11),
+            ('LINEABOVE', (0, 0), (-1, 0), 1, grey, None, (4, 4)),
             ('LEFTPADDING', (0, 0), (-1, -1), 0),
             ('RIGHTPADDING', (0, 0), (-1, -1), 0),
             ('TOPPADDING', (0, 0), (-1, -1), 0),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
         ]))
         elements.append(advice_dash)
-
-        payment_title_table = Table([[Paragraph("PAYMENT ADVICE", payment_title_style), ""]], colWidths=[3.9 * inch, 3.6 * inch])
-        payment_title_table.setStyle(TableStyle([
-            ('LEFTPADDING', (0, 0), (-1, -1), 0),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
-            ('TOPPADDING', (0, 0), (-1, -1), 0),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-        ]))
-        elements.append(payment_title_table)
 
         to_block = Table([
             [Paragraph("To:", body_style), Paragraph(f"{business_name}<br/>{'<br/>'.join(business_address_lines)}", body_style)],
@@ -716,7 +763,7 @@ def generate_invoice_pdf(invoice_id):
         advice_rows = [
             ["Customer", invoice[3]],
             ["Invoice Number", str(invoice[2])],
-            ["Amount Due", f"{float(invoice[11]):.2f}"],
+            ["Amount Due", Paragraph(f"{float(invoice[11]):.2f}", advice_value_bold_style)],
             ["Due Date", due_date],
             ["Amount Enclosed", ""],
         ]
@@ -724,7 +771,9 @@ def generate_invoice_pdf(invoice_id):
         advice_table.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('LINEBELOW', (0, 0), (-1, -1), 0.35, light_line),
+            ('LINEBELOW', (0, 1), (-1, 1), 0.35, light_line),
+            ('LINEBELOW', (0, 3), (-1, 3), 0.35, light_line),
+            ('LINEBELOW', (1, 4), (1, 4), 1, black),
             ('LEFTPADDING', (0, 0), (-1, -1), 0),
             ('RIGHTPADDING', (0, 0), (-1, -1), 0),
             ('TOPPADDING', (0, 0), (-1, -1), 3),
@@ -745,7 +794,29 @@ def generate_invoice_pdf(invoice_id):
             ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
         ]))
 
-        payment_section = Table([[to_block, advice_block]], colWidths=[3.8 * inch, 3.7 * inch])
+        indented_to_block = Table([["", to_block]], colWidths=[0.35 * inch, 3.45 * inch])
+        indented_to_block.setStyle(TableStyle([
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ]))
+
+        payment_left_block = Table([
+            [Paragraph("PAYMENT ADVICE", payment_title_style)],
+            [""],
+            [indented_to_block],
+        ], colWidths=[3.9 * inch], rowHeights=[0.32 * inch, 0.35 * inch, None])
+        payment_left_block.setStyle(TableStyle([
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ]))
+
+        payment_section = Table([[payment_left_block, advice_block]], colWidths=[3.9 * inch, 3.6 * inch])
         payment_section.setStyle(TableStyle([
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
             ('LEFTPADDING', (0, 0), (-1, -1), 0),
