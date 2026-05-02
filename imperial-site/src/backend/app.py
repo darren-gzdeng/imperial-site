@@ -56,41 +56,13 @@ def init_db():
         cursor.execute("ALTER TABLE users ADD COLUMN first_name TEXT")
     if "last_name" not in user_columns:
         cursor.execute("ALTER TABLE users ADD COLUMN last_name TEXT")
+    if "phone" not in user_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN phone TEXT")
+    if "address" not in user_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN address TEXT")
     if "created_at" not in user_columns:
         cursor.execute("ALTER TABLE users ADD COLUMN created_at TIMESTAMP")
         cursor.execute("UPDATE users SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS password_reset_tokens (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        token TEXT UNIQUE NOT NULL,
-        expires_at TIMESTAMP NOT NULL,
-        used INTEGER DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id)
-    )
-    """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS invoices (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        invoice_number TEXT UNIQUE NOT NULL,
-        client_name TEXT NOT NULL,
-        client_email TEXT,
-        client_address TEXT,
-        issue_date TEXT NOT NULL,
-        due_date TEXT NOT NULL,
-        items TEXT NOT NULL,
-        subtotal REAL NOT NULL,
-        tax REAL NOT NULL,
-        total REAL NOT NULL,
-        status TEXT DEFAULT 'draft',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id)
-    )
-    """)
 
     conn.commit()
     conn.close()
