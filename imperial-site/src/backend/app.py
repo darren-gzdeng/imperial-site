@@ -312,6 +312,74 @@ def dashboard(user):
 
 
 # -------------------------
+# Account
+# -------------------------
+@app.route('/account', methods=['GET'])
+@token_required
+def get_account(user):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            SELECT id, first_name, last_name, email, phone, address, created_at
+            FROM users
+            WHERE id=?
+        """, (user["user_id"],))
+        account = cursor.fetchone()
+
+        if not account:
+            return jsonify({"error": "User not found"}), 404
+
+        return jsonify({
+            "id": account[0],
+            "first_name": account[1] or "",
+            "last_name": account[2] or "",
+            "email": account[3],
+            "phone": account[4] or "",
+            "address": account[5] or "",
+            "created_at": account[6],
+        })
+    finally:
+        conn.close()
+
+
+@app.route('/account', methods=['PUT'])
+@token_required
+def update_account(user):
+    data = request.json or {}
+
+    first_name = (data.get("first_name") or "").strip()
+    last_name = (data.get("last_name") or "").strip()
+    email = (data.get("email") or "").strip().lower()
+    phone = (data.get("phone") or "").strip()
+    address = (data.get("address") or "").strip()
+
+    if not email:
+        return jsonify({"error": "Email is required"}), 400
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            UPDATE users
+            SET first_name=?, last_name=?, email=?, phone=?, address=?
+            WHERE id=?
+        """, (first_name, last_name, email, phone, address, user["user_id"]))
+
+        if cursor.rowcount == 0:
+            return jsonify({"error": "User not found"}), 404
+
+        conn.commit()
+        return jsonify({"message": "Account updated successfully"})
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "Email is already in use"}), 400
+    finally:
+        conn.close()
+
+
+# -------------------------
 # Create Invoice
 # -------------------------
 @app.route('/invoices', methods=['POST'])
