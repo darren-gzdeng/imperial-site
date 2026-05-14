@@ -206,7 +206,7 @@ export default function Login() {
         setMessage("Login successful");
         localStorage.setItem("token", data.token);
         setTimeout(() => {
-          window.location.href = "/imperial-site/";
+          window.location.href = "/imperial-site/account";
         }, 600);
       } else {
         setMessage(data.error || "Login failed");
@@ -242,7 +242,7 @@ export default function Login() {
         setMessage("Google login successful");
         localStorage.setItem("token", data.token);
         setTimeout(() => {
-          window.location.href = "/imperial-site/";
+          window.location.href = "/imperial-site/account";
         }, 600);
       } else {
         setMessage(data.error || "Google login failed");

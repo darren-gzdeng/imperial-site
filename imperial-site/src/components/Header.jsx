@@ -37,9 +37,9 @@ export default function Header() {
             <Link to={accountPath} className="icon-btn" aria-label="Account">
               <User size={20} strokeWidth={2} />
             </Link>
-            <button className="icon-btn" aria-label="Cart">
+            <Link to="/cart" className="icon-btn" aria-label="Cart">
               <ShoppingBag size={20} strokeWidth={2} />
-            </button>
+            </Link>
             <button className="icon-btn" aria-label="Language">
               <Languages size={20} strokeWidth={2} />
             </button>
