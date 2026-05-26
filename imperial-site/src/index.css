@@ -12,6 +12,11 @@ body,
   min-height: 100%;
 }
 
+html {
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+}
+
 body {
   font-family: Arial, sans-serif;
   background: white;
@@ -58,12 +63,22 @@ a {
 }
 
 .brand {
+  display: inline-block;
   font-family: "Cormorant Garamond", Georgia, serif;
   font-size: 1.4rem;
   font-weight: 500;
   letter-spacing: 0.3px;
   color: rgb(243, 243, 243);
   white-space: nowrap;
+  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.brand:hover {
+  transform: translateY(-2px) scale(1.02);
+}
+
+.brand:active {
+  transform: scale(0.97);
 }
 
 .header-actions {
@@ -86,7 +101,7 @@ a {
 
 .icon-btn:hover {
   color: #f8fafc;
-  transform: translateY(-1px);
+  transform: translateY(-2px) scale(1.08);
 }
 
 .main-nav {
@@ -98,6 +113,7 @@ a {
 }
 
 .nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -105,12 +121,46 @@ a {
   font-size: 0.85rem;
   font-weight: 300;
   color: #C5BA99;
-  transition: color 0.2s ease;
+  transition: color 0.2s ease, transform 0.16s ease;
   white-space: nowrap;
+}
+
+.nav-item::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: -8px;
+  left: 0;
+  height: 1px;
+  background: currentColor;
+  transform: scaleX(0);
+  transform-origin: center;
+  transition: transform 0.2s ease;
 }
  
 .nav-item:hover {
   color: #C5BA99;
+  transform: translateY(-2px);
+}
+
+.nav-item:hover::after {
+  transform: scaleX(1);
+}
+
+.nav-item svg {
+  transition: transform 0.16s ease;
+}
+
+.nav-item:hover svg {
+  transform: translateY(1px);
+}
+
+.nav-item:active {
+  transform: translateY(1px) scale(0.97);
+}
+
+.nav-item:active svg {
+  transform: translateY(2px);
 }
 
 .header-actions {
@@ -133,7 +183,12 @@ a {
 
 .icon-btn:hover {
   color: #f8fafc;
-  transform: translateY(-1px);
+  transform: translateY(-2px) scale(1.08);
+}
+
+.icon-btn:active {
+  transform: translateY(1px) scale(0.9);
+  transition-duration: 0.08s;
 }
 
 .app-shell {
@@ -152,6 +207,98 @@ a {
 
 h1 {
   margin-bottom: 16px;
+}
+
+.about-page {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 28px 0 34px;
+}
+
+.about-hero {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.84fr) minmax(340px, 1.16fr);
+  gap: 74px;
+  align-items: start;
+}
+
+.about-heading {
+  position: sticky;
+  top: 46px;
+}
+
+.about-eyebrow {
+  margin-bottom: 18px;
+  color: #8b7950;
+  font-family: "Inter", Arial, sans-serif;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+.about-heading h1 {
+  margin-bottom: 24px;
+  color: #191919;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: clamp(3.75rem, 7vw, 5.4rem);
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  line-height: 0.9;
+}
+
+.about-lead {
+  max-width: 295px;
+  padding-top: 22px;
+  border-top: 1px solid #c5ba99;
+  color: #4e4a42;
+  font-family: "Inter", Arial, sans-serif;
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.about-copy {
+  padding-top: 56px;
+  color: #413d36;
+  font-family: "Inter", Arial, sans-serif;
+  font-size: 1.02rem;
+  line-height: 1.95;
+}
+
+.about-copy p + p {
+  margin-top: 30px;
+}
+
+.about-copy p:first-child {
+  color: #22201d;
+  font-size: 1.22rem;
+  line-height: 1.8;
+}
+
+.about-signature {
+  margin-top: 82px;
+  padding: 36px 40px;
+  border-top: 1px solid #e2d9c5;
+  border-bottom: 1px solid #e2d9c5;
+  text-align: center;
+}
+
+.about-signature span {
+  display: block;
+  margin-bottom: 12px;
+  color: #191919;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 1.9rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+.about-signature p {
+  color: #8b7950;
+  font-family: "Inter", Arial, sans-serif;
+  font-size: 0.8rem;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
 }
 
 @media (max-width: 1100px) {
@@ -187,6 +334,28 @@ h1 {
 
   .header-actions {
     order: 2;
+  }
+
+  .about-page {
+    padding-top: 8px;
+  }
+
+  .about-hero {
+    grid-template-columns: 1fr;
+    gap: 42px;
+  }
+
+  .about-heading {
+    position: static;
+  }
+
+  .about-copy {
+    max-width: 680px;
+    padding-top: 0;
+  }
+
+  .about-signature {
+    margin-top: 64px;
   }
 }
 
@@ -261,6 +430,28 @@ h1 {
 }
 
 @media (max-width: 800px) {
+  .about-heading h1 {
+    font-size: clamp(3.1rem, 18vw, 3.8rem);
+  }
+
+  .about-copy {
+    font-size: 0.96rem;
+    line-height: 1.8;
+  }
+
+  .about-copy p:first-child {
+    font-size: 1.08rem;
+  }
+
+  .about-signature {
+    padding: 30px 16px;
+  }
+
+  .about-signature p {
+    letter-spacing: 0.18em;
+    line-height: 1.8;
+  }
+
   .footer-grid {
     grid-template-columns: 1fr;
     gap: 28px;
@@ -269,5 +460,15 @@ h1 {
   .footer-bottom {
     flex-direction: column;
     align-items: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand,
+  .icon-btn,
+  .nav-item,
+  .nav-item svg,
+  .nav-item::after {
+    transition-duration: 0.01ms;
   }
 }

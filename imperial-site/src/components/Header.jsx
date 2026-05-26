@@ -28,7 +28,7 @@ export default function Header() {
         <div className="header-top">
           <div className="brand-wrap">
             <Link to="/" className="brand">
-              Imperial Ocean Select
+              Imperial Ocean
             </Link>
           </div>
           <div className="header-actions">
