@@ -5,6 +5,7 @@ import { Search, User, ShoppingBag, Languages, ChevronDown } from "lucide-react"
 const navItems = [
   { label: "Home", path: "/" },
   { label: "About", path: "/about" },
+  { label: "Products", path: "/products" },
   { label: "New Arrivals", path: "/new-arrivals" },
   { label: "Seafood & Sashimi", path: "/seafood", hasDropdown: true },
   { label: "For Hotpot", path: "/hotpot", hasDropdown: true },
