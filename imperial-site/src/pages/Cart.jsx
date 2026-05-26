@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router";
 
 const styles = {
@@ -93,6 +94,12 @@ const styles = {
 };
 
 export default function Cart() {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  useEffect(() => {
+    setIsLoggedIn(!!localStorage.getItem("token"));
+  }, []);
+
   return (
     <div style={styles.page}>
       <section style={styles.emptyState}>
@@ -102,19 +109,21 @@ export default function Cart() {
           Continue shopping
         </Link>
 
-        <div style={styles.accountBlock}>
-          <h2 style={styles.accountTitle}>Have an account?</h2>
-          <p style={styles.accountText}>
-            <Link to="/login" style={styles.inlineLink}>Log in</Link> to check out faster.
-          </p>
-        </div>
+        {!isLoggedIn && (
+          <div style={styles.accountBlock}>
+            <h2 style={styles.accountTitle}>Have an account?</h2>
+            <p style={styles.accountText}>
+              <Link to="/login" style={styles.inlineLink}>Log in</Link> to check out faster.
+            </p>
+          </div>
+        )}
       </section>
 
       <section style={styles.notes}>
         <h2 style={styles.noteHeading}>Please Note:</h2>
 
         <p style={styles.noteText}>
-          <Link to="/login" style={styles.inlineLink}>Login</Link> to find your Imperial account details in your account page.
+          <Link to="/login" style={styles.inlineLink}>Login</Link> to find your Celeplate Pass credit balance in your account page.
         </p>
 
         <h2 style={styles.deliveryHeading}>Mainland UK Deliver Fee:</h2>
