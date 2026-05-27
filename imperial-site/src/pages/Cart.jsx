@@ -123,17 +123,8 @@ export default function Cart() {
         <h2 style={styles.noteHeading}>Please Note:</h2>
 
         <p style={styles.noteText}>
-          <Link to="/login" style={styles.inlineLink}>Login</Link> to find your Celeplate Pass credit balance in your account page.
+          <Link to="/login" style={styles.inlineLink}>Login</Link> to find your balance in your account page.
         </p>
-
-        <h2 style={styles.deliveryHeading}>Mainland UK Deliver Fee:</h2>
-        <ul style={styles.list}>
-          <li style={styles.listItem}>Orders under £39: small order delivery fee £15.</li>
-          <li style={styles.listItem}>Orders between £39-£85: delivery fee £6.5.</li>
-          <li style={styles.listItem}>
-            <span style={styles.strong}>Orders over £85: free delivery.</span>
-          </li>
-        </ul>
       </section>
     </div>
   );

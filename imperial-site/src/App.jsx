@@ -15,6 +15,7 @@ import Account from "./pages/Account";
 import Cart from "./pages/Cart";
 import Invoice from "./pages/Invoice";
 import ChefRecipe from "./pages/ChefRecipe";
+import RecipeDetail from "./pages/RecipeDetail";
 import ShippingDelivery from "./pages/ShippingDelivery";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
@@ -38,6 +39,7 @@ export default function App() {
         <Route path="cart" element={<Cart />} />
         <Route path="invoice" element={<Invoice />} />
         <Route path="chef-recipe" element={<ChefRecipe />} />
+        <Route path="chef-recipe/:slug" element={<RecipeDetail />} />
         <Route path="shipping-delivery" element={<ShippingDelivery />} />
         <Route path="privacy-policy" element={<PrivacyPolicy />} />
         <Route path="terms-of-service" element={<TermsOfService />} />
