@@ -21,11 +21,16 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
 
 CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    description TEXT,
+    item TEXT NOT NULL,
     sku TEXT UNIQUE,
     weight REAL,
-    unit_price REAL NOT NULL
+    unit_price REAL NOT NULL,
+    updated_at TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS clients (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_name TEXT UNIQUE NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS inventory (
@@ -61,8 +66,6 @@ CREATE TABLE IF NOT EXISTS invoices (
     user_id INTEGER NOT NULL,
     invoice_number TEXT UNIQUE NOT NULL,
     client_name TEXT NOT NULL,
-    client_email TEXT,
-    client_address TEXT,
     issue_date TEXT NOT NULL,
     due_date TEXT NOT NULL,
     items TEXT NOT NULL,

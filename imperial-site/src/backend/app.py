@@ -7,6 +7,7 @@ import datetime
 import secrets
 import smtplib
 from functools import wraps
+from zoneinfo import ZoneInfo
 from flask_cors import CORS
 from google.auth.transport import requests
 from google.oauth2 import id_token
@@ -15,7 +16,7 @@ from io import BytesIO
 from email.message import EmailMessage
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, KeepTogether
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 
@@ -25,6 +26,23 @@ app.config['SECRET_KEY'] = 'super_secret_key'
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "users.db")
+SYDNEY_TZ = ZoneInfo("Australia/Sydney")
+
+
+def sydney_timestamp():
+    return datetime.datetime.now(SYDNEY_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
+def utc_timestamp_to_sydney(value):
+    if not value:
+        return sydney_timestamp()
+
+    try:
+        cleaned_value = value.replace(" AEST", "").replace(" AEDT", "")
+        utc_datetime = datetime.datetime.strptime(cleaned_value, "%Y-%m-%d %H:%M:%S").replace(tzinfo=datetime.timezone.utc)
+        return utc_datetime.astimezone(SYDNEY_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
+    except ValueError:
+        return value
 
 # -------------------------
 # Database helper
@@ -63,6 +81,107 @@ def init_db():
     if "created_at" not in user_columns:
         cursor.execute("ALTER TABLE users ADD COLUMN created_at TIMESTAMP")
         cursor.execute("UPDATE users SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
+
+    cursor.execute("PRAGMA table_info(products)")
+    product_columns = {column[1] for column in cursor.fetchall()}
+    expected_product_columns = {"id", "item", "sku", "weight", "unit_price", "updated_at"}
+    if product_columns and product_columns != expected_product_columns:
+        cursor.execute("ALTER TABLE products RENAME TO products_old")
+        cursor.execute("""
+        CREATE TABLE products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item TEXT NOT NULL,
+            sku TEXT UNIQUE,
+            weight REAL,
+            unit_price REAL NOT NULL,
+            updated_at TIMESTAMP
+        )
+        """)
+
+        item_expression = "item" if "item" in product_columns else "name"
+        sku_expression = "sku" if "sku" in product_columns else "NULL"
+        weight_expression = "weight" if "weight" in product_columns else "NULL"
+        updated_at_expression = "updated_at" if "updated_at" in product_columns else "NULL"
+
+        cursor.execute(f"""
+            INSERT INTO products (id, item, sku, weight, unit_price, updated_at)
+            SELECT id, {item_expression}, {sku_expression}, {weight_expression}, unit_price, {updated_at_expression}
+            FROM products_old
+            WHERE {item_expression} IS NOT NULL AND {item_expression} != ''
+        """)
+        cursor.execute("DROP TABLE products_old")
+        cursor.execute("SELECT id, updated_at FROM products")
+        for product_id, updated_at in cursor.fetchall():
+            cursor.execute(
+                "UPDATE products SET updated_at=? WHERE id=?",
+                (utc_timestamp_to_sydney(updated_at), product_id)
+            )
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS app_migrations (
+        name TEXT PRIMARY KEY,
+        applied_at TEXT NOT NULL
+    )
+    """)
+    cursor.execute("SELECT 1 FROM app_migrations WHERE name='products_updated_at_sydney'")
+    if not cursor.fetchone():
+        cursor.execute("SELECT id, updated_at FROM products")
+        for product_id, updated_at in cursor.fetchall():
+            cursor.execute(
+                "UPDATE products SET updated_at=? WHERE id=?",
+                (utc_timestamp_to_sydney(updated_at), product_id)
+            )
+        cursor.execute(
+            "INSERT INTO app_migrations (name, applied_at) VALUES (?, ?)",
+            ("products_updated_at_sydney", sydney_timestamp())
+        )
+
+    cursor.execute("PRAGMA table_info(invoices)")
+    invoice_columns = {column[1] for column in cursor.fetchall()}
+    expected_invoice_columns = {
+        "id", "user_id", "invoice_number", "client_name", "issue_date", "due_date",
+        "items", "subtotal", "tax", "total", "status", "created_at"
+    }
+    if invoice_columns and invoice_columns != expected_invoice_columns:
+        cursor.execute("ALTER TABLE invoices RENAME TO invoices_old")
+        cursor.execute("""
+        CREATE TABLE invoices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            invoice_number TEXT UNIQUE NOT NULL,
+            client_name TEXT NOT NULL,
+            issue_date TEXT NOT NULL,
+            due_date TEXT NOT NULL,
+            items TEXT NOT NULL,
+            subtotal REAL NOT NULL,
+            tax REAL NOT NULL,
+            total REAL NOT NULL,
+            status TEXT DEFAULT 'draft',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+        """)
+
+        status_expression = "status" if "status" in invoice_columns else "'draft'"
+        created_at_expression = "created_at" if "created_at" in invoice_columns else "CURRENT_TIMESTAMP"
+
+        cursor.execute(f"""
+            INSERT INTO invoices (
+                id, user_id, invoice_number, client_name, issue_date, due_date,
+                items, subtotal, tax, total, status, created_at
+            )
+            SELECT
+                id, user_id, invoice_number, client_name, issue_date, due_date,
+                items, subtotal, tax, total, {status_expression}, {created_at_expression}
+            FROM invoices_old
+        """)
+        cursor.execute("DROP TABLE invoices_old")
+
+    cursor.execute("""
+        INSERT OR IGNORE INTO clients (client_name)
+        SELECT DISTINCT client_name
+        FROM invoices
+        WHERE client_name IS NOT NULL AND client_name != ''
+    """)
 
     conn.commit()
     conn.close()
@@ -312,6 +431,218 @@ def dashboard(user):
 
 
 # -------------------------
+# Products
+# -------------------------
+@app.route('/products', methods=['GET'])
+def get_products():
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            SELECT id, item, sku, weight, unit_price, updated_at
+            FROM products
+            ORDER BY item
+        """)
+        products = cursor.fetchall()
+
+        return jsonify([
+            {
+                "id": product[0],
+                "item": product[1],
+                "sku": product[2] or "",
+                "weight": product[3],
+                "unit_price": product[4],
+                "updated_at": product[5],
+            }
+            for product in products
+        ])
+    finally:
+        conn.close()
+
+
+@app.route('/products', methods=['POST'])
+def create_product():
+    data = request.json or {}
+
+    item = (data.get("item") or "").strip()
+    unit_price = data.get("unit_price")
+
+    if not item or unit_price in (None, ""):
+        return jsonify({"error": "Item and unit price are required"}), 400
+
+    try:
+        unit_price = float(unit_price)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Unit price must be a number"}), 400
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        updated_at = sydney_timestamp()
+        cursor.execute(
+            "INSERT INTO products (item, unit_price, updated_at) VALUES (?, ?, ?)",
+            (item, unit_price, updated_at)
+        )
+        product_id = cursor.lastrowid
+        conn.commit()
+        return jsonify({
+            "id": product_id,
+            "item": item,
+            "sku": "",
+            "weight": None,
+            "unit_price": unit_price,
+            "updated_at": updated_at,
+        }), 201
+    finally:
+        conn.close()
+
+
+@app.route('/products/<int:product_id>', methods=['PUT'])
+def update_product(product_id):
+    data = request.json or {}
+
+    item = (data.get("item") or "").strip()
+    unit_price = data.get("unit_price")
+
+    if not item or unit_price in (None, ""):
+        return jsonify({"error": "Item and unit price are required"}), 400
+
+    try:
+        unit_price = float(unit_price)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Unit price must be a number"}), 400
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        updated_at = sydney_timestamp()
+        cursor.execute("""
+            UPDATE products
+            SET item=?, unit_price=?, updated_at=?
+            WHERE id=?
+        """, (item, unit_price, updated_at, product_id))
+
+        if cursor.rowcount == 0:
+            return jsonify({"error": "Product not found"}), 404
+
+        conn.commit()
+        return jsonify({
+            "id": product_id,
+            "item": item,
+            "unit_price": unit_price,
+            "updated_at": updated_at,
+        })
+    finally:
+        conn.close()
+
+
+@app.route('/products/<int:product_id>', methods=['DELETE'])
+def delete_product(product_id):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("DELETE FROM products WHERE id=?", (product_id,))
+
+        if cursor.rowcount == 0:
+            return jsonify({"error": "Product not found"}), 404
+
+        conn.commit()
+        return jsonify({"message": "Product deleted successfully"})
+    finally:
+        conn.close()
+
+
+# -------------------------
+# Clients
+# -------------------------
+@app.route('/clients', methods=['GET'])
+def get_clients():
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("SELECT id, client_name FROM clients ORDER BY client_name")
+        clients = cursor.fetchall()
+
+        return jsonify([
+            {
+                "id": client[0],
+                "client_name": client[1],
+            }
+            for client in clients
+        ])
+    finally:
+        conn.close()
+
+
+@app.route('/clients', methods=['POST'])
+def create_client():
+    data = request.json or {}
+    client_name = (data.get("client_name") or "").strip()
+
+    if not client_name:
+        return jsonify({"error": "Client name is required"}), 400
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("INSERT INTO clients (client_name) VALUES (?)", (client_name,))
+        conn.commit()
+        return jsonify({"id": cursor.lastrowid, "client_name": client_name}), 201
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "Client already exists"}), 400
+    finally:
+        conn.close()
+
+
+@app.route('/clients/<int:client_id>', methods=['PUT'])
+def update_client(client_id):
+    data = request.json or {}
+    client_name = (data.get("client_name") or "").strip()
+
+    if not client_name:
+        return jsonify({"error": "Client name is required"}), 400
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("UPDATE clients SET client_name=? WHERE id=?", (client_name, client_id))
+
+        if cursor.rowcount == 0:
+            return jsonify({"error": "Client not found"}), 404
+
+        conn.commit()
+        return jsonify({"id": client_id, "client_name": client_name})
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "Client already exists"}), 400
+    finally:
+        conn.close()
+
+
+@app.route('/clients/<int:client_id>', methods=['DELETE'])
+def delete_client(client_id):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("DELETE FROM clients WHERE id=?", (client_id,))
+
+        if cursor.rowcount == 0:
+            return jsonify({"error": "Client not found"}), 404
+
+        conn.commit()
+        return jsonify({"message": "Client deleted successfully"})
+    finally:
+        conn.close()
+
+
+# -------------------------
 # Account
 # -------------------------
 @app.route('/account', methods=['GET'])
@@ -390,8 +721,6 @@ def create_invoice():
         user_id = data.get("user_id")
         invoice_number = data.get("invoice_number")
         client_name = data.get("client_name")
-        client_email = data.get("client_email")
-        client_address = data.get("client_address")
         issue_date = data.get("issue_date")
         due_date = data.get("due_date")
         items = data.get("items")
@@ -413,11 +742,9 @@ def create_invoice():
 
         try:
             cursor.execute("""
-                INSERT INTO invoices (user_id, invoice_number, client_name, client_email, client_address, 
-                                     issue_date, due_date, items, subtotal, tax, total)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (user_id, invoice_number, client_name, client_email, client_address, 
-                  issue_date, due_date, json.dumps(items), subtotal, tax, total))
+                INSERT INTO invoices (user_id, invoice_number, client_name, issue_date, due_date, items, subtotal, tax, total)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, invoice_number, client_name, issue_date, due_date, json.dumps(items), subtotal, tax, total))
             conn.commit()
             return jsonify({"message": "Invoice created successfully", "invoice_id": cursor.lastrowid}), 201
         except sqlite3.IntegrityError as e:
@@ -450,19 +777,37 @@ def get_invoices(user_id):
                 "user_id": inv[1],
                 "invoice_number": inv[2],
                 "client_name": inv[3],
-                "client_email": inv[4],
-                "client_address": inv[5],
-                "issue_date": inv[6],
-                "due_date": inv[7],
-                "items": json.loads(inv[8]),
-                "subtotal": inv[9],
-                "tax": inv[10],
-                "total": inv[11],
-                "status": inv[12],
-                "created_at": inv[13]
+                "issue_date": inv[4],
+                "due_date": inv[5],
+                "items": json.loads(inv[6]),
+                "subtotal": inv[7],
+                "tax": inv[8],
+                "total": inv[9],
+                "status": inv[10],
+                "created_at": inv[11]
             })
         
         return jsonify(invoice_list)
+    finally:
+        conn.close()
+
+
+# -------------------------
+# Delete Invoice
+# -------------------------
+@app.route('/invoices/<int:invoice_id>', methods=['DELETE'])
+def delete_invoice(invoice_id):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("DELETE FROM invoices WHERE id=?", (invoice_id,))
+
+        if cursor.rowcount == 0:
+            return jsonify({"error": "Invoice not found"}), 404
+
+        conn.commit()
+        return jsonify({"message": "Invoice deleted successfully"})
     finally:
         conn.close()
 
@@ -609,9 +954,10 @@ def generate_invoice_pdf(invoice_id):
             fontName='Helvetica-Bold',
         )
 
-        items = json.loads(invoice[8])
-        issue_date = format_au_date(invoice[6])
-        due_date = format_au_date(invoice[7] or invoice[6])
+        items = json.loads(invoice[6])
+        item_count = len(items)
+        issue_date = format_au_date(invoice[4])
+        due_date = format_au_date(invoice[5] or invoice[4])
 
         business_name = "ONE PACIFIC TRADING PTY LTD"
         business_address_lines = [
@@ -627,7 +973,7 @@ def generate_invoice_pdf(invoice_id):
             "Please Use Quote Or Invoice number As Ref",
         ]
 
-        top_spacer = Table([[""]], colWidths=[7.5 * inch], rowHeights=[0.35 * inch])
+        top_spacer = Table([[""]], colWidths=[7.5 * inch], rowHeights=[0.25 * inch])
         top_spacer.setStyle(TableStyle([
             ('LEFTPADDING', (0, 0), (-1, -1), 0),
             ('RIGHTPADDING', (0, 0), (-1, -1), 0),
@@ -712,14 +1058,15 @@ def generate_invoice_pdf(invoice_id):
             ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
         ]))
         elements.append(bill_to_row)
-        elements.append(Spacer(1, 1.25 * inch))
+        before_items_space = max(0.45, 1.25 - (0.08 * max(0, item_count - 1)))
+        elements.append(Spacer(1, before_items_space * inch))
 
-        table_data = [["Description", "Quantity", "Unit Price", "GST", "Amount AUD"]]
+        table_data = [["Item", "Quantity", "Unit Price", "GST", "Amount AUD"]]
         for item in items:
             table_data.append([
                 item.get("description", ""),
-                f"{float(item.get('quantity', 0)):.2f}kg",
-                f"{float(item.get('unit_price', 0)):.2f}/kg",
+                f"{float(item.get('quantity', 0)):.2f}",
+                f"{float(item.get('unit_price', 0)):.2f}",
                 "10%",
                 f"{float(item.get('amount', 0)):.2f}",
             ])
@@ -735,23 +1082,23 @@ def generate_invoice_pdf(invoice_id):
             ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
             ('LEFTPADDING', (0, 0), (-1, -1), 3),
             ('RIGHTPADDING', (0, 0), (-1, -1), 3),
-            ('TOPPADDING', (0, 0), (-1, -1), 4),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 2),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
         ]))
         elements.append(items_table)
         elements.append(Spacer(1, 0.04 * inch))
 
         totals_rows = [
-            [Paragraph("Subtotal", totals_label_style), Paragraph(f"{float(invoice[9]):.2f}", totals_value_style)],
-            [Paragraph("TOTAL GST 10%", totals_label_style), Paragraph(f"{float(invoice[10]):.2f}", totals_value_style)],
-            [Paragraph("TOTAL AUD", totals_total_label_style), Paragraph(f"{float(invoice[11]):.2f}", totals_total_value_style)],
+            [Paragraph("Subtotal", totals_label_style), Paragraph(f"{float(invoice[7]):.2f}", totals_value_style)],
+            [Paragraph("TOTAL GST 10%", totals_label_style), Paragraph(f"{float(invoice[8]):.2f}", totals_value_style)],
+            [Paragraph("TOTAL AUD", totals_total_label_style), Paragraph(f"{float(invoice[9]):.2f}", totals_total_value_style)],
         ]
         totals_table = Table(totals_rows, colWidths=[1.3 * inch, 1.2 * inch])
         totals_table.setStyle(TableStyle([
             ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
             ('LINEABOVE', (0, 2), (-1, 2), 1, black),
-            ('TOPPADDING', (0, 0), (-1, -1), 4),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 2),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
             ('LEFTPADDING', (0, 0), (-1, -1), 3),
             ('RIGHTPADDING', (0, 0), (-1, -1), 3),
         ]))
@@ -777,7 +1124,8 @@ def generate_invoice_pdf(invoice_id):
             ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
         ]))
         elements.append(bank_details)
-        elements.append(Spacer(1, 1.7 * inch))
+        before_advice_space = max(0.12, 2.05 - (0.20 * max(0, item_count - 1)))
+        elements.append(Spacer(1, before_advice_space * inch))
 
         advice_dash = Table([[""]], colWidths=[7.5 * inch], rowHeights=[0.08 * inch])
         advice_dash.setStyle(TableStyle([
@@ -787,7 +1135,7 @@ def generate_invoice_pdf(invoice_id):
             ('TOPPADDING', (0, 0), (-1, -1), 0),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
         ]))
-        elements.append(advice_dash)
+        payment_advice_elements = [advice_dash]
 
         to_block = Table([
             [Paragraph("To:", body_style), Paragraph(f"{business_name}<br/>{'<br/>'.join(business_address_lines)}", body_style)],
@@ -803,7 +1151,7 @@ def generate_invoice_pdf(invoice_id):
         advice_rows = [
             ["Customer", invoice[3]],
             ["Invoice Number", str(invoice[2])],
-            ["Amount Due", Paragraph(f"{float(invoice[11]):.2f}", advice_value_bold_style)],
+            ["Amount Due", Paragraph(f"{float(invoice[9]):.2f}", advice_value_bold_style)],
             ["Due Date", due_date],
             ["Amount Enclosed", ""],
         ]
@@ -864,7 +1212,8 @@ def generate_invoice_pdf(invoice_id):
             ('TOPPADDING', (0, 0), (-1, -1), 0),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
         ]))
-        elements.append(payment_section)
+        payment_advice_elements.append(payment_section)
+        elements.append(KeepTogether(payment_advice_elements))
 
         # Build PDF
         doc.build(elements)
