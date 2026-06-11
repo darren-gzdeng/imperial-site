@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { LogOut, Save } from "lucide-react";
+import { FileText, LogOut, Save, Trash2, Users } from "lucide-react";
+
+const ACCOUNT_TYPES = ["Admin", "Staff", "User", "Wholesale Customer"];
 
 const styles = {
   page: {
@@ -29,6 +31,28 @@ const styles = {
     cursor: "pointer",
     textDecoration: "underline",
     textUnderlineOffset: "6px",
+  },
+  accountActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: "24px",
+    marginTop: "34px",
+    marginBottom: "64px",
+    flexWrap: "wrap",
+  },
+  actionLink: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "10px",
+    padding: "12px 16px",
+    border: "1px solid #d7dbe2",
+    borderRadius: "8px",
+    background: "#ffffff",
+    color: "#1b1d22",
+    fontSize: "0.95rem",
+    fontWeight: 600,
+    cursor: "pointer",
+    textDecoration: "none",
   },
   section: {
     marginBottom: "78px",
@@ -105,6 +129,79 @@ const styles = {
     color: "#4b5563",
     fontSize: "0.95rem",
   },
+  adminHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    margin: "0 0 24px",
+  },
+  adminTitle: {
+    margin: 0,
+    fontSize: "2.1rem",
+    fontWeight: 400,
+    letterSpacing: "-0.04em",
+  },
+  tableWrap: {
+    width: "100%",
+    overflowX: "auto",
+    border: "1px solid #e1e5eb",
+    borderRadius: "8px",
+  },
+  table: {
+    width: "100%",
+    minWidth: "920px",
+    borderCollapse: "collapse",
+    textAlign: "left",
+  },
+  th: {
+    padding: "14px 16px",
+    borderBottom: "1px solid #e1e5eb",
+    background: "#f7f8fa",
+    color: "#3b3d42",
+    fontSize: "0.82rem",
+    fontWeight: 700,
+    textTransform: "uppercase",
+  },
+  td: {
+    padding: "14px 16px",
+    borderBottom: "1px solid #edf0f4",
+    color: "#343840",
+    fontSize: "0.95rem",
+    verticalAlign: "middle",
+  },
+  select: {
+    width: "100%",
+    minWidth: "180px",
+    border: "1px solid #d7dbe2",
+    borderRadius: "8px",
+    padding: "10px 12px",
+    color: "#1b1d22",
+    fontSize: "0.95rem",
+    background: "#ffffff",
+  },
+  compactButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "8px",
+    minWidth: "88px",
+    height: "40px",
+    border: "none",
+    borderRadius: "8px",
+    background: "#1e40af",
+    color: "#ffffff",
+    fontSize: "0.9rem",
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  dangerButton: {
+    background: "#b42318",
+  },
+  actionGroup: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+  },
 };
 
 export default function Account() {
@@ -112,6 +209,10 @@ export default function Account() {
   const [formData, setFormData] = useState(null);
   const [message, setMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [adminUsers, setAdminUsers] = useState([]);
+  const [adminMessage, setAdminMessage] = useState("");
+  const [savingUserId, setSavingUserId] = useState(null);
+  const [deletingUserId, setDeletingUserId] = useState(null);
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -143,6 +244,10 @@ export default function Account() {
 
         setUser(data);
         setFormData(data);
+
+        if (data.account_type === "Admin") {
+          fetchAdminUsers(token);
+        }
       } catch (err) {
         setMessage(`Failed to load account details: ${err.message}`);
       }
@@ -150,6 +255,34 @@ export default function Account() {
 
     fetchAccount();
   }, []);
+
+  const fetchAdminUsers = async (token) => {
+    try {
+      const res = await fetch("http://127.0.0.1:5000/admin/users", {
+        headers: {
+          Authorization: token,
+        },
+      });
+
+      const data = await res.json();
+
+      if (res.status === 401) {
+        localStorage.removeItem("token");
+        window.location.href = "/imperial-site/login";
+        return;
+      }
+
+      if (!res.ok) {
+        setAdminMessage(data.error || "Failed to load users");
+        return;
+      }
+
+      setAdminUsers(data);
+      setAdminMessage("");
+    } catch (err) {
+      setAdminMessage(`Failed to load users: ${err.message}`);
+    }
+  };
 
   const handleLogout = () => {
     localStorage.removeItem("token");
@@ -211,6 +344,120 @@ export default function Account() {
     }
   };
 
+  const handleManagedUserChange = (userId, accountType) => {
+    setAdminUsers((prev) =>
+      prev.map((managedUser) =>
+        managedUser.id === userId
+          ? { ...managedUser, account_type: accountType, isDirty: true }
+          : managedUser
+      )
+    );
+  };
+
+  const handleManagedUserSave = async (managedUser) => {
+    const token = localStorage.getItem("token");
+
+    if (!token) {
+      window.location.href = "/imperial-site/login";
+      return;
+    }
+
+    setSavingUserId(managedUser.id);
+    setAdminMessage("");
+
+    try {
+      const res = await fetch(`http://127.0.0.1:5000/admin/users/${managedUser.id}/account-type`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: token,
+        },
+        body: JSON.stringify({
+          account_type: managedUser.account_type,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (res.status === 401) {
+        localStorage.removeItem("token");
+        window.location.href = "/imperial-site/login";
+        return;
+      }
+
+      if (!res.ok) {
+        setAdminMessage(data.error || "Failed to update user");
+        return;
+      }
+
+      setAdminUsers((prev) =>
+        prev.map((item) =>
+          item.id === managedUser.id
+            ? { ...item, account_type: data.account_type, isDirty: false }
+            : item
+        )
+      );
+
+      if (managedUser.id === user.id) {
+        setUser((prev) => ({ ...prev, account_type: data.account_type }));
+        setFormData((prev) => ({ ...prev, account_type: data.account_type }));
+      }
+
+      setAdminMessage("User account type updated.");
+    } catch (err) {
+      setAdminMessage(`Failed to update user: ${err.message}`);
+    } finally {
+      setSavingUserId(null);
+    }
+  };
+
+  const handleManagedUserDelete = async (managedUser) => {
+    const token = localStorage.getItem("token");
+
+    if (!token) {
+      window.location.href = "/imperial-site/login";
+      return;
+    }
+
+    const confirmed = window.confirm(`Delete ${managedUser.email}? This cannot be undone.`);
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingUserId(managedUser.id);
+    setAdminMessage("");
+
+    try {
+      const res = await fetch(`http://127.0.0.1:5000/admin/users/${managedUser.id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: token,
+        },
+      });
+
+      const data = await res.json();
+
+      if (res.status === 401) {
+        localStorage.removeItem("token");
+        window.location.href = "/imperial-site/login";
+        return;
+      }
+
+      if (!res.ok) {
+        setAdminMessage(data.error || "Failed to delete user");
+        return;
+      }
+
+      setAdminUsers((prev) => prev.filter((item) => item.id !== managedUser.id));
+      setAdminMessage("User deleted.");
+    } catch (err) {
+      setAdminMessage(`Failed to delete user: ${err.message}`);
+    } finally {
+      setDeletingUserId(null);
+    }
+  };
+
   if (!user || !formData) {
     if (message) {
       return <div style={{ textAlign: "center", padding: "50px" }}>{message}</div>;
@@ -223,10 +470,19 @@ export default function Account() {
     <div style={styles.page}>
       <h1 style={styles.title}>Account</h1>
 
-      <button onClick={handleLogout} style={styles.logoutButton}>
-        <LogOut size={22} strokeWidth={1.7} />
-        <span>Log out</span>
-      </button>
+      <div style={styles.accountActions}>
+        <button onClick={handleLogout} style={{ ...styles.logoutButton, marginTop: 0 }}>
+          <LogOut size={22} strokeWidth={1.7} />
+          <span>Log out</span>
+        </button>
+
+        {["Admin", "Staff"].includes(user.account_type) && (
+          <a href="/imperial-site/invoice" style={styles.actionLink}>
+            <FileText size={18} strokeWidth={1.8} />
+            <span>Invoices</span>
+          </a>
+        )}
+      </div>
 
       <section style={styles.section}>
         <h2 style={styles.sectionTitle}>Order history</h2>
@@ -307,6 +563,91 @@ export default function Account() {
           {message && <p style={styles.message}>{message}</p>}
         </form>
       </section>
+
+      {user.account_type === "Admin" && (
+        <section style={styles.section}>
+          <div style={styles.adminHeader}>
+            <Users size={28} strokeWidth={1.7} />
+            <h2 style={styles.adminTitle}>User management</h2>
+          </div>
+
+          <div style={styles.tableWrap}>
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  <th style={styles.th}>Name</th>
+                  <th style={styles.th}>Email</th>
+                  <th style={styles.th}>Phone</th>
+                  <th style={styles.th}>Created</th>
+                  <th style={styles.th}>Account type</th>
+                  <th style={styles.th}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {adminUsers.map((managedUser) => {
+                  const fullName = `${managedUser.first_name} ${managedUser.last_name}`.trim();
+
+                  return (
+                    <tr key={managedUser.id}>
+                      <td style={styles.td}>{fullName || "No name"}</td>
+                      <td style={styles.td}>{managedUser.email}</td>
+                      <td style={styles.td}>{managedUser.phone || "-"}</td>
+                      <td style={styles.td}>{managedUser.created_at || "-"}</td>
+                      <td style={styles.td}>
+                        <select
+                          value={managedUser.account_type}
+                          onChange={(e) => handleManagedUserChange(managedUser.id, e.target.value)}
+                          style={styles.select}
+                        >
+                          {ACCOUNT_TYPES.map((accountType) => (
+                            <option key={accountType} value={accountType}>
+                              {accountType}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td style={styles.td}>
+                        <div style={styles.actionGroup}>
+                          <button
+                            type="button"
+                            onClick={() => handleManagedUserSave(managedUser)}
+                            disabled={!managedUser.isDirty || savingUserId === managedUser.id}
+                            style={{
+                              ...styles.compactButton,
+                              opacity: !managedUser.isDirty || savingUserId === managedUser.id ? 0.55 : 1,
+                              cursor: !managedUser.isDirty || savingUserId === managedUser.id ? "not-allowed" : "pointer",
+                            }}
+                          >
+                            {savingUserId === managedUser.id ? "Saving..." : "Save"}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleManagedUserDelete(managedUser)}
+                            disabled={managedUser.id === user.id || deletingUserId === managedUser.id}
+                            style={{
+                              ...styles.compactButton,
+                              ...styles.dangerButton,
+                              opacity: managedUser.id === user.id || deletingUserId === managedUser.id ? 0.55 : 1,
+                              cursor: managedUser.id === user.id || deletingUserId === managedUser.id ? "not-allowed" : "pointer",
+                            }}
+                            title={managedUser.id === user.id ? "You cannot delete your own account" : "Delete user"}
+                          >
+                            <Trash2 size={16} strokeWidth={1.8} />
+                            <span>{deletingUserId === managedUser.id ? "Deleting..." : "Delete"}</span>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {adminMessage && <p style={styles.message}>{adminMessage}</p>}
+        </section>
+      )}
     </div>
   );
 }

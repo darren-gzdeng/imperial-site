@@ -36,9 +36,24 @@ CREATE TABLE IF NOT EXISTS clients (
 
 CREATE TABLE IF NOT EXISTS inventory (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    product_id INTEGER NOT NULL,
-    stock_quantity INTEGER NOT NULL DEFAULT 0,
+    product_id INTEGER NOT NULL UNIQUE,
+    stock_quantity REAL NOT NULL DEFAULT 0,
     FOREIGN KEY (product_id) REFERENCES products(id)
+);
+
+CREATE TABLE IF NOT EXISTS stock_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER NOT NULL,
+    change_quantity REAL NOT NULL,
+    stock_after REAL NOT NULL,
+    action_type TEXT NOT NULL,
+    reference_type TEXT,
+    reference_id INTEGER,
+    comment TEXT,
+    created_at TEXT NOT NULL,
+    created_by INTEGER,
+    FOREIGN KEY (product_id) REFERENCES products(id),
+    FOREIGN KEY (created_by) REFERENCES users(id)
 );
 
 CREATE TABLE IF NOT EXISTS orders (

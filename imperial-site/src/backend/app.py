@@ -27,6 +27,7 @@ app.config['SECRET_KEY'] = 'super_secret_key'
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "users.db")
 SYDNEY_TZ = ZoneInfo("Australia/Sydney")
+ACCOUNT_TYPES = ("Admin", "Staff", "User", "Wholesale Customer")
 
 
 def sydney_timestamp():
@@ -43,6 +44,97 @@ def utc_timestamp_to_sydney(value):
         return utc_datetime.astimezone(SYDNEY_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
     except ValueError:
         return value
+
+
+def normalize_quantity(value):
+    try:
+        quantity = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    if quantity <= 0:
+        return None
+
+    return quantity
+
+
+def ensure_inventory_rows(cursor):
+    cursor.execute("""
+        INSERT INTO inventory (product_id, stock_quantity)
+        SELECT products.id, 0
+        FROM products
+        LEFT JOIN inventory ON inventory.product_id = products.id
+        WHERE inventory.id IS NULL
+    """)
+
+
+def resolve_invoice_item_product(cursor, item):
+    product_id = item.get("product_id")
+
+    if product_id not in (None, ""):
+        cursor.execute("SELECT id, item FROM products WHERE id=?", (product_id,))
+        product = cursor.fetchone()
+        if product:
+            return product[0], product[1]
+
+    description = (item.get("description") or "").strip()
+    if not description:
+        return None, ""
+
+    cursor.execute("SELECT id, item FROM products WHERE item=? ORDER BY id LIMIT 1", (description,))
+    product = cursor.fetchone()
+
+    if not product:
+        return None, description
+
+    return product[0], product[1]
+
+
+def get_invoice_stock_movements(cursor, items):
+    movements = {}
+    labels = {}
+
+    for item in items:
+        product_id, label = resolve_invoice_item_product(cursor, item)
+        quantity = normalize_quantity(item.get("quantity"))
+
+        if not product_id or quantity is None:
+            continue
+
+        movements[product_id] = movements.get(product_id, 0) + quantity
+        labels[product_id] = label
+
+    return movements, labels
+
+
+def record_stock_history(
+    cursor,
+    product_id,
+    change_quantity,
+    stock_after,
+    action_type,
+    comment="",
+    reference_type=None,
+    reference_id=None,
+    created_by=None,
+):
+    cursor.execute("""
+        INSERT INTO stock_history (
+            product_id, change_quantity, stock_after, action_type,
+            reference_type, reference_id, comment, created_at, created_by
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        product_id,
+        change_quantity,
+        stock_after,
+        action_type,
+        reference_type,
+        reference_id,
+        comment,
+        sydney_timestamp(),
+        created_by,
+    ))
 
 # -------------------------
 # Database helper
@@ -190,6 +282,37 @@ def init_db():
         FROM invoices
         WHERE client_name IS NOT NULL AND client_name != ''
     """)
+
+    cursor.execute("""
+        DELETE FROM inventory
+        WHERE id NOT IN (
+            SELECT MIN(id)
+            FROM inventory
+            GROUP BY product_id
+        )
+    """)
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_product_id ON inventory(product_id)")
+    ensure_inventory_rows(cursor)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS stock_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER NOT NULL,
+            change_quantity REAL NOT NULL,
+            stock_after REAL NOT NULL,
+            action_type TEXT NOT NULL,
+            reference_type TEXT,
+            reference_id INTEGER,
+            comment TEXT,
+            created_at TEXT NOT NULL,
+            created_by INTEGER,
+            FOREIGN KEY (product_id) REFERENCES products(id),
+            FOREIGN KEY (created_by) REFERENCES users(id)
+        )
+    """)
+    cursor.execute("PRAGMA table_info(stock_history)")
+    history_columns = {column[1] for column in cursor.fetchall()}
+    if "created_by" not in history_columns:
+        cursor.execute("ALTER TABLE stock_history ADD COLUMN created_by INTEGER")
 
     conn.commit()
     conn.close()
@@ -455,6 +578,30 @@ def admin_required(f):
     return decorated
 
 
+def staff_or_admin_required(f):
+    @wraps(f)
+    @token_required
+    def decorated(user, *args, **kwargs):
+        conn = get_db()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute("SELECT account_type FROM users WHERE id=?", (user["user_id"],))
+            account = cursor.fetchone()
+        finally:
+            conn.close()
+
+        if not account:
+            return jsonify({"error": "User not found"}), 404
+
+        if account[0] not in ("Admin", "Staff"):
+            return jsonify({"error": "Staff or admin access required"}), 403
+
+        return f(user, *args, **kwargs)
+
+    return decorated
+
+
 # -------------------------
 # Protected route
 # -------------------------
@@ -468,15 +615,19 @@ def dashboard(user):
 # Products
 # -------------------------
 @app.route('/products', methods=['GET'])
-@admin_required
+@staff_or_admin_required
 def get_products(user):
     conn = get_db()
     cursor = conn.cursor()
 
     try:
+        ensure_inventory_rows(cursor)
+        conn.commit()
         cursor.execute("""
-            SELECT id, item, sku, weight, unit_price, updated_at
+            SELECT products.id, products.item, products.sku, products.weight, products.unit_price,
+                   products.updated_at, COALESCE(inventory.stock_quantity, 0)
             FROM products
+            LEFT JOIN inventory ON inventory.product_id = products.id
             ORDER BY item
         """)
         products = cursor.fetchall()
@@ -489,6 +640,7 @@ def get_products(user):
                 "weight": product[3],
                 "unit_price": product[4],
                 "updated_at": product[5],
+                "stock_quantity": product[6],
             }
             for product in products
         ])
@@ -503,6 +655,11 @@ def create_product(user):
 
     item = (data.get("item") or "").strip()
     unit_price = data.get("unit_price")
+    stock_quantity = normalize_quantity(data.get("stock_quantity"))
+    stock_comment = (data.get("stock_comment") or "").strip()
+
+    if stock_quantity is None:
+        stock_quantity = 0
 
     if not item or unit_price in (None, ""):
         return jsonify({"error": "Item and unit price are required"}), 400
@@ -522,6 +679,20 @@ def create_product(user):
             (item, unit_price, updated_at)
         )
         product_id = cursor.lastrowid
+        cursor.execute(
+            "INSERT INTO inventory (product_id, stock_quantity) VALUES (?, ?)",
+            (product_id, stock_quantity)
+        )
+        if stock_quantity > 0:
+            record_stock_history(
+                cursor,
+                product_id,
+                stock_quantity,
+                stock_quantity,
+                "initial_stock",
+                stock_comment or "Initial stock when item was created",
+                created_by=user["user_id"],
+            )
         conn.commit()
         return jsonify({
             "id": product_id,
@@ -530,6 +701,7 @@ def create_product(user):
             "weight": None,
             "unit_price": unit_price,
             "updated_at": updated_at,
+            "stock_quantity": stock_quantity,
         }), 201
     finally:
         conn.close()
@@ -583,6 +755,8 @@ def delete_product(user, product_id):
     cursor = conn.cursor()
 
     try:
+        cursor.execute("DELETE FROM stock_history WHERE product_id=?", (product_id,))
+        cursor.execute("DELETE FROM inventory WHERE product_id=?", (product_id,))
         cursor.execute("DELETE FROM products WHERE id=?", (product_id,))
 
         if cursor.rowcount == 0:
@@ -598,7 +772,7 @@ def delete_product(user, product_id):
 # Clients
 # -------------------------
 @app.route('/clients', methods=['GET'])
-@admin_required
+@staff_or_admin_required
 def get_clients(user):
     conn = get_db()
     cursor = conn.cursor()
@@ -753,11 +927,294 @@ def update_account(user):
         conn.close()
 
 
+@app.route('/inventory', methods=['GET'])
+@admin_required
+def get_inventory(user):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        ensure_inventory_rows(cursor)
+        conn.commit()
+        cursor.execute("""
+            SELECT products.id, products.item, products.unit_price, products.updated_at,
+                   COALESCE(inventory.stock_quantity, 0)
+            FROM products
+            LEFT JOIN inventory ON inventory.product_id = products.id
+            ORDER BY products.item
+        """)
+        rows = cursor.fetchall()
+
+        return jsonify([
+            {
+                "product_id": row[0],
+                "item": row[1],
+                "unit_price": row[2],
+                "updated_at": row[3],
+                "stock_quantity": row[4],
+            }
+            for row in rows
+        ])
+    finally:
+        conn.close()
+
+
+@app.route('/inventory/<int:product_id>/stock-in', methods=['POST'])
+@admin_required
+def add_inventory_stock(user, product_id):
+    data = request.json or {}
+    quantity = normalize_quantity(data.get("quantity"))
+    comment = (data.get("comment") or "").strip()
+
+    if quantity is None:
+        return jsonify({"error": "Quantity must be greater than zero"}), 400
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("SELECT id, item FROM products WHERE id=?", (product_id,))
+        product = cursor.fetchone()
+
+        if not product:
+            return jsonify({"error": "Product not found"}), 404
+
+        cursor.execute(
+            "INSERT OR IGNORE INTO inventory (product_id, stock_quantity) VALUES (?, 0)",
+            (product_id,)
+        )
+        cursor.execute("""
+            UPDATE inventory
+            SET stock_quantity = stock_quantity + ?
+            WHERE product_id=?
+        """, (quantity, product_id))
+        cursor.execute("SELECT stock_quantity FROM inventory WHERE product_id=?", (product_id,))
+        stock = cursor.fetchone()[0]
+        record_stock_history(
+            cursor,
+            product_id,
+            quantity,
+            stock,
+            "stock_in",
+            comment,
+            created_by=user["user_id"],
+        )
+        conn.commit()
+
+        return jsonify({
+            "product_id": product_id,
+            "item": product[1],
+            "stock_quantity": stock,
+        })
+    finally:
+        conn.close()
+
+
+@app.route('/inventory/<int:product_id>/stock-out', methods=['POST'])
+@admin_required
+def remove_inventory_stock(user, product_id):
+    data = request.json or {}
+    quantity = normalize_quantity(data.get("quantity"))
+    comment = (data.get("comment") or "").strip()
+
+    if quantity is None:
+        return jsonify({"error": "Quantity must be greater than zero"}), 400
+
+    if not comment:
+        return jsonify({"error": "Comment is required when removing stock"}), 400
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("SELECT id, item FROM products WHERE id=?", (product_id,))
+        product = cursor.fetchone()
+
+        if not product:
+            return jsonify({"error": "Product not found"}), 404
+
+        cursor.execute(
+            "INSERT OR IGNORE INTO inventory (product_id, stock_quantity) VALUES (?, 0)",
+            (product_id,)
+        )
+        cursor.execute("SELECT stock_quantity FROM inventory WHERE product_id=?", (product_id,))
+        current_stock = cursor.fetchone()[0]
+
+        if current_stock < quantity:
+            return jsonify({
+                "error": f"Not enough stock. Available: {current_stock}, requested: {quantity}"
+            }), 400
+
+        cursor.execute("""
+            UPDATE inventory
+            SET stock_quantity = stock_quantity - ?
+            WHERE product_id=?
+        """, (quantity, product_id))
+        cursor.execute("SELECT stock_quantity FROM inventory WHERE product_id=?", (product_id,))
+        stock = cursor.fetchone()[0]
+        record_stock_history(
+            cursor,
+            product_id,
+            -quantity,
+            stock,
+            "manual_stock_out",
+            comment,
+            created_by=user["user_id"],
+        )
+        conn.commit()
+
+        return jsonify({
+            "product_id": product_id,
+            "item": product[1],
+            "stock_quantity": stock,
+        })
+    finally:
+        conn.close()
+
+
+@app.route('/inventory/<int:product_id>/history', methods=['GET'])
+@admin_required
+def get_inventory_history(user, product_id):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("SELECT id, item FROM products WHERE id=?", (product_id,))
+        product = cursor.fetchone()
+
+        if not product:
+            return jsonify({"error": "Product not found"}), 404
+
+        cursor.execute("""
+            SELECT stock_history.id, stock_history.change_quantity, stock_history.stock_after,
+                   stock_history.action_type, stock_history.reference_type,
+                   stock_history.reference_id, stock_history.comment,
+                   stock_history.created_at, users.first_name, users.last_name, users.email
+            FROM stock_history
+            LEFT JOIN users ON users.id = stock_history.created_by
+            WHERE stock_history.product_id=?
+            ORDER BY stock_history.id DESC
+        """, (product_id,))
+        rows = cursor.fetchall()
+
+        return jsonify({
+            "product_id": product_id,
+            "item": product[1],
+            "history": [
+                {
+                    "id": row[0],
+                    "change_quantity": row[1],
+                    "stock_after": row[2],
+                    "action_type": row[3],
+                    "reference_type": row[4],
+                    "reference_id": row[5],
+                    "comment": row[6] or "",
+                    "created_at": row[7],
+                    "created_by": (
+                        f"{row[8] or ''} {row[9] or ''}".strip()
+                        or row[10]
+                        or ""
+                    ),
+                }
+                for row in rows
+            ],
+        })
+    finally:
+        conn.close()
+
+
+# -------------------------
+# Admin users
+# -------------------------
+@app.route('/admin/users', methods=['GET'])
+@admin_required
+def get_admin_users(user):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            SELECT id, first_name, last_name, email, phone, address, account_type, created_at
+            FROM users
+            ORDER BY created_at DESC, id DESC
+        """)
+        users = cursor.fetchall()
+
+        return jsonify([
+            {
+                "id": account[0],
+                "first_name": account[1] or "",
+                "last_name": account[2] or "",
+                "email": account[3],
+                "phone": account[4] or "",
+                "address": account[5] or "",
+                "account_type": account[6] or "User",
+                "created_at": account[7],
+            }
+            for account in users
+        ])
+    finally:
+        conn.close()
+
+
+@app.route('/admin/users/<int:user_id>/account-type', methods=['PUT'])
+@admin_required
+def update_admin_user_account_type(user, user_id):
+    data = request.json or {}
+    account_type = (data.get("account_type") or "").strip()
+
+    if account_type not in ACCOUNT_TYPES:
+        return jsonify({"error": "Invalid account type"}), 400
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute(
+            "UPDATE users SET account_type=? WHERE id=?",
+            (account_type, user_id)
+        )
+
+        if cursor.rowcount == 0:
+            return jsonify({"error": "User not found"}), 404
+
+        conn.commit()
+
+        return jsonify({
+            "id": user_id,
+            "account_type": account_type,
+        })
+    finally:
+        conn.close()
+
+
+@app.route('/admin/users/<int:user_id>', methods=['DELETE'])
+@admin_required
+def delete_admin_user(user, user_id):
+    if user_id == user["user_id"]:
+        return jsonify({"error": "You cannot delete your own account"}), 400
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("DELETE FROM password_reset_tokens WHERE user_id=?", (user_id,))
+        cursor.execute("DELETE FROM users WHERE id=?", (user_id,))
+
+        if cursor.rowcount == 0:
+            return jsonify({"error": "User not found"}), 404
+
+        conn.commit()
+        return jsonify({"message": "User deleted successfully"})
+    finally:
+        conn.close()
+
+
 # -------------------------
 # Create Invoice
 # -------------------------
 @app.route('/invoices', methods=['POST'])
-@admin_required
+@staff_or_admin_required
 def create_invoice(user):
     try:
         data = request.json
@@ -785,12 +1242,56 @@ def create_invoice(user):
         cursor = conn.cursor()
 
         try:
+            for item in items:
+                quantity = normalize_quantity(item.get("quantity"))
+                if not (item.get("description") and quantity is not None):
+                    continue
+
+                product_id, _ = resolve_invoice_item_product(cursor, item)
+                if not product_id:
+                    return jsonify({
+                        "error": f"Invoice item does not match an existing product: {item.get('description')}"
+                    }), 400
+
+            movements, labels = get_invoice_stock_movements(cursor, items)
+
+            ensure_inventory_rows(cursor)
+            for product_id, quantity in movements.items():
+                cursor.execute("SELECT stock_quantity FROM inventory WHERE product_id=?", (product_id,))
+                stock_row = cursor.fetchone()
+                available = stock_row[0] if stock_row else 0
+
+                if available < quantity:
+                    return jsonify({
+                        "error": f"Not enough stock for {labels.get(product_id, 'item')}. Available: {available}, required: {quantity}"
+                    }), 400
+
             cursor.execute("""
                 INSERT INTO invoices (user_id, invoice_number, client_name, issue_date, due_date, items, subtotal, tax, total)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (user_id, invoice_number, client_name, issue_date, due_date, json.dumps(items), subtotal, tax, total))
+            invoice_id = cursor.lastrowid
+            for product_id, quantity in movements.items():
+                cursor.execute("""
+                    UPDATE inventory
+                    SET stock_quantity = stock_quantity - ?
+                    WHERE product_id=?
+                """, (quantity, product_id))
+                cursor.execute("SELECT stock_quantity FROM inventory WHERE product_id=?", (product_id,))
+                stock_after = cursor.fetchone()[0]
+                record_stock_history(
+                    cursor,
+                    product_id,
+                    -quantity,
+                    stock_after,
+                    "invoice_sale",
+                    f"Sold on invoice {invoice_number}",
+                    reference_type="invoice",
+                    reference_id=invoice_id,
+                    created_by=user["user_id"],
+                )
             conn.commit()
-            return jsonify({"message": "Invoice created successfully", "invoice_id": cursor.lastrowid}), 201
+            return jsonify({"message": "Invoice created successfully", "invoice_id": invoice_id}), 201
         except sqlite3.IntegrityError as e:
             return jsonify({"error": f"Invoice number already exists or database error: {str(e)}"}), 400
         except sqlite3.OperationalError as e:
@@ -806,7 +1307,7 @@ def create_invoice(user):
 # Get Invoices
 # -------------------------
 @app.route('/invoices/<int:user_id>', methods=['GET'])
-@admin_required
+@staff_or_admin_required
 def get_invoices(user, user_id):
     conn = get_db()
     cursor = conn.cursor()
@@ -847,10 +1348,41 @@ def delete_invoice(user, invoice_id):
     cursor = conn.cursor()
 
     try:
+        cursor.execute("SELECT invoice_number, items FROM invoices WHERE id=?", (invoice_id,))
+        invoice = cursor.fetchone()
+
+        if not invoice:
+            return jsonify({"error": "Invoice not found"}), 404
+
+        invoice_number = invoice[0]
+        items = json.loads(invoice[1])
+        movements, _ = get_invoice_stock_movements(cursor, items)
+        ensure_inventory_rows(cursor)
+
         cursor.execute("DELETE FROM invoices WHERE id=?", (invoice_id,))
 
         if cursor.rowcount == 0:
             return jsonify({"error": "Invoice not found"}), 404
+
+        for product_id, quantity in movements.items():
+            cursor.execute("""
+                UPDATE inventory
+                SET stock_quantity = stock_quantity + ?
+                WHERE product_id=?
+            """, (quantity, product_id))
+            cursor.execute("SELECT stock_quantity FROM inventory WHERE product_id=?", (product_id,))
+            stock_after = cursor.fetchone()[0]
+            record_stock_history(
+                cursor,
+                product_id,
+                quantity,
+                stock_after,
+                "invoice_deleted",
+                f"Stock return from {invoice_number}",
+                reference_type="invoice",
+                reference_id=invoice_id,
+                created_by=user["user_id"],
+            )
 
         conn.commit()
         return jsonify({"message": "Invoice deleted successfully"})
@@ -862,7 +1394,7 @@ def delete_invoice(user, invoice_id):
 # Generate Invoice PDF
 # -------------------------
 @app.route('/invoices/<int:invoice_id>/pdf', methods=['GET'])
-@admin_required
+@staff_or_admin_required
 def generate_invoice_pdf(user, invoice_id):
     conn = get_db()
     cursor = conn.cursor()

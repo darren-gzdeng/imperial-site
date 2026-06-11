@@ -45,6 +45,8 @@ const getAuthHeaders = () => {
   return token ? { Authorization: token } : {};
 };
 
+const STOCK_HISTORY_PAGE_SIZE = 8;
+
 const generateInvoiceNumber = (invoices, date = new Date()) => {
   const year = String(date.getFullYear()).slice(-2);
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -69,16 +71,24 @@ const createInitialFormData = (invoices = []) => {
     client_name: "",
     issue_date: formatDateInput(today),
     due_date: dueDate,
-    items: [{ description: "", quantity: 1, unit_price: 0, amount: 0 }],
+    items: [{ product_id: "", description: "", quantity: 1, unit_price: 0, amount: 0 }],
   };
 };
 
 export default function Invoice() {
   const [invoices, setInvoices] = useState([]);
   const [products, setProducts] = useState([]);
-  const [newProduct, setNewProduct] = useState({ item: "", unit_price: "" });
+  const [newProduct, setNewProduct] = useState({ item: "", unit_price: "", stock_quantity: "", stock_comment: "" });
   const [productMessage, setProductMessage] = useState("");
   const [selectedProductId, setSelectedProductId] = useState("");
+  const [stockRows, setStockRows] = useState([]);
+  const [stockInputs, setStockInputs] = useState({});
+  const [stockComments, setStockComments] = useState({});
+  const [stockHistory, setStockHistory] = useState([]);
+  const [stockHistoryPage, setStockHistoryPage] = useState(1);
+  const [stockHistoryItem, setStockHistoryItem] = useState("");
+  const [selectedHistoryProductId, setSelectedHistoryProductId] = useState("");
+  const [stockMessage, setStockMessage] = useState("");
   const [clients, setClients] = useState([]);
   const [newClient, setNewClient] = useState({ client_name: "" });
   const [clientMessage, setClientMessage] = useState("");
@@ -86,8 +96,10 @@ export default function Invoice() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showEditItems, setShowEditItems] = useState(false);
   const [showClients, setShowClients] = useState(false);
+  const [showStock, setShowStock] = useState(false);
   const [formData, setFormData] = useState(createInitialFormData());
   const [user_id, setUserId] = useState(null);
+  const [accountType, setAccountType] = useState("");
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -109,16 +121,20 @@ export default function Invoice() {
           return;
         }
 
-        if (!res.ok || account.account_type !== "Admin") {
-          alert("Admin access required.");
+        if (!res.ok || !["Admin", "Staff"].includes(account.account_type)) {
+          alert("Staff or admin access required.");
           window.location.href = "/imperial-site/account";
           return;
         }
 
         setUserId(account.id);
+        setAccountType(account.account_type);
         fetchInvoices(account.id);
         fetchProducts();
         fetchClients();
+        if (account.account_type === "Admin") {
+          fetchStock();
+        }
       } catch (err) {
         alert("Failed to check account access: " + err.message);
         window.location.href = "/imperial-site/account";
@@ -162,6 +178,24 @@ export default function Invoice() {
     }
   };
 
+  const fetchStock = async () => {
+    try {
+      const res = await fetch("http://127.0.0.1:5000/inventory", {
+        headers: getAuthHeaders(),
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        setStockRows(data);
+        setStockMessage("");
+      } else {
+        setStockMessage(data.error || "Failed to load stock");
+      }
+    } catch (err) {
+      setStockMessage("Failed to load stock: " + err.message);
+    }
+  };
+
   const fetchClients = async () => {
     try {
       const res = await fetch("http://127.0.0.1:5000/clients", {
@@ -197,10 +231,11 @@ export default function Invoice() {
   };
 
   const handleInvoiceItemSelect = (index, value) => {
-    const selectedProduct = products.find((product) => product.item === value);
+    const selectedProduct = products.find((product) => String(product.id) === String(value));
     const newItems = [...formData.items];
 
-    newItems[index].description = value;
+    newItems[index].product_id = value;
+    newItems[index].description = selectedProduct?.item || "";
     if (selectedProduct) {
       newItems[index].unit_price = selectedProduct.unit_price;
       newItems[index].amount = newItems[index].quantity * selectedProduct.unit_price;
@@ -340,8 +375,9 @@ export default function Invoice() {
 
       if (res.ok) {
         setProducts((prev) => [...prev, data].sort((a, b) => a.item.localeCompare(b.item)));
-        setNewProduct({ item: "", unit_price: "" });
+        setNewProduct({ item: "", unit_price: "", stock_quantity: "", stock_comment: "" });
         setProductMessage("Product created.");
+        fetchStock();
       } else {
         setProductMessage(data.error || "Failed to create product");
       }
@@ -412,8 +448,137 @@ export default function Invoice() {
   const addItem = () => {
     setFormData((prev) => ({
       ...prev,
-      items: [...prev.items, { description: "", quantity: 1, unit_price: 0, amount: 0 }],
+      items: [...prev.items, { product_id: "", description: "", quantity: 1, unit_price: 0, amount: 0 }],
     }));
+  };
+
+  const deleteItem = (index) => {
+    setFormData((prev) => {
+      if (prev.items.length <= 1) {
+        return {
+          ...prev,
+          items: [{ product_id: "", description: "", quantity: 1, unit_price: 0, amount: 0 }],
+        };
+      }
+
+      return {
+        ...prev,
+        items: prev.items.filter((_, itemIndex) => itemIndex !== index),
+      };
+    });
+  };
+
+  const handleStockInputChange = (productId, value) => {
+    setStockInputs((prev) => ({ ...prev, [productId]: value }));
+  };
+
+  const handleStockCommentChange = (productId, value) => {
+    setStockComments((prev) => ({ ...prev, [productId]: value }));
+  };
+
+  const fetchStockHistory = async (productId) => {
+    try {
+      const res = await fetch(`http://127.0.0.1:5000/inventory/${productId}/history`, {
+        headers: getAuthHeaders(),
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        setSelectedHistoryProductId(productId);
+        setStockHistoryItem(data.item);
+        setStockHistory(data.history);
+        setStockHistoryPage(1);
+        setStockMessage("");
+      } else {
+        setStockMessage(data.error || "Failed to load stock history");
+      }
+    } catch (err) {
+      setStockMessage("Failed to load stock history: " + err.message);
+    }
+  };
+
+  const addStock = async (productId) => {
+    const quantity = stockInputs[productId];
+    const comment = stockComments[productId] || "";
+    setStockMessage("");
+
+    try {
+      const res = await fetch(`http://127.0.0.1:5000/inventory/${productId}/stock-in`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({ quantity, comment }),
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        setStockRows((prev) =>
+          prev.map((row) =>
+            row.product_id === productId
+              ? { ...row, stock_quantity: data.stock_quantity }
+              : row
+          )
+        );
+        setProducts((prev) =>
+          prev.map((product) =>
+            product.id === productId
+              ? { ...product, stock_quantity: data.stock_quantity }
+              : product
+          )
+        );
+        setStockInputs((prev) => ({ ...prev, [productId]: "" }));
+        setStockComments((prev) => ({ ...prev, [productId]: "" }));
+        setStockMessage("Stock updated.");
+        if (String(selectedHistoryProductId) === String(productId)) {
+          fetchStockHistory(productId);
+        }
+      } else {
+        setStockMessage(data.error || "Failed to update stock");
+      }
+    } catch (err) {
+      setStockMessage("Failed to update stock: " + err.message);
+    }
+  };
+
+  const removeStock = async (productId) => {
+    const quantity = stockInputs[productId];
+    const comment = stockComments[productId] || "";
+    setStockMessage("");
+
+    try {
+      const res = await fetch(`http://127.0.0.1:5000/inventory/${productId}/stock-out`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({ quantity, comment }),
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        setStockRows((prev) =>
+          prev.map((row) =>
+            row.product_id === productId
+              ? { ...row, stock_quantity: data.stock_quantity }
+              : row
+          )
+        );
+        setProducts((prev) =>
+          prev.map((product) =>
+            product.id === productId
+              ? { ...product, stock_quantity: data.stock_quantity }
+              : product
+          )
+        );
+        setStockInputs((prev) => ({ ...prev, [productId]: "" }));
+        setStockComments((prev) => ({ ...prev, [productId]: "" }));
+        setStockMessage("Stock removed.");
+        if (String(selectedHistoryProductId) === String(productId)) {
+          fetchStockHistory(productId);
+        }
+      } else {
+        setStockMessage(data.error || "Failed to remove stock");
+      }
+    } catch (err) {
+      setStockMessage("Failed to remove stock: " + err.message);
+    }
   };
 
   const calculateTotals = () => {
@@ -467,6 +632,10 @@ export default function Invoice() {
         setShowCreateForm(false);
         setFormData(createInitialFormData([...invoices, invoiceData]));
         fetchInvoices(user_id);
+        fetchProducts();
+        if (accountType === "Admin") {
+          fetchStock();
+        }
       } else {
         alert(`Error: ${data.error || "Failed to create invoice"}`);
         console.error("Server error:", data);
@@ -519,6 +688,10 @@ export default function Invoice() {
 
       if (res.ok) {
         setInvoices((prev) => prev.filter((invoice) => invoice.id !== invoiceId));
+        fetchProducts();
+        if (accountType === "Admin") {
+          fetchStock();
+        }
       } else {
         alert(`Error: ${data.error || "Failed to delete invoice"}`);
       }
@@ -537,28 +710,83 @@ export default function Invoice() {
     setShowCreateForm(shouldOpen);
     setShowEditItems(false);
     setShowClients(false);
+    setShowStock(false);
   };
 
   const toggleEditItems = () => {
+    if (accountType !== "Admin") {
+      return;
+    }
+
     const shouldOpen = !showEditItems;
 
     setShowEditItems(shouldOpen);
     setShowCreateForm(false);
     setShowClients(false);
+    setShowStock(false);
   };
 
   const toggleClients = () => {
+    if (accountType !== "Admin") {
+      return;
+    }
+
     const shouldOpen = !showClients;
 
     setShowClients(shouldOpen);
     setShowCreateForm(false);
     setShowEditItems(false);
+    setShowStock(false);
+  };
+
+  const toggleStock = () => {
+    if (accountType !== "Admin") {
+      return;
+    }
+
+    const shouldOpen = !showStock;
+
+    setShowStock(shouldOpen);
+    setShowCreateForm(false);
+    setShowEditItems(false);
+    setShowClients(false);
+
+    if (shouldOpen) {
+      fetchStock();
+    }
   };
 
   const { subtotal, tax, total } = calculateTotals();
+  const isAdmin = accountType === "Admin";
+  const stockHistoryPageCount = Math.max(1, Math.ceil(stockHistory.length / STOCK_HISTORY_PAGE_SIZE));
+  const visibleStockHistory = stockHistory.slice(
+    (stockHistoryPage - 1) * STOCK_HISTORY_PAGE_SIZE,
+    stockHistoryPage * STOCK_HISTORY_PAGE_SIZE
+  );
+  const stockGridColumns = "minmax(270px, 1.8fr) 96px 88px minmax(220px, 1.4fr) 78px 92px 92px";
+  const productEditGridColumns = "1.4fr 2fr 1fr 64px 70px";
+  const stockInputStyle = {
+    width: "100%",
+    height: "38px",
+    boxSizing: "border-box",
+    padding: "0 12px",
+    border: "1px solid #cbd5e1",
+    borderRadius: "6px",
+    fontSize: "0.9rem",
+  };
+  const stockButtonStyle = {
+    width: "100%",
+    height: "38px",
+    border: "none",
+    borderRadius: "6px",
+    color: "white",
+    fontSize: "0.84rem",
+    fontWeight: 700,
+    cursor: "pointer",
+  };
 
   return (
-    <div style={{ maxWidth: "1000px", margin: "50px auto", padding: "20px" }}>
+    <div style={{ maxWidth: "1180px", margin: "50px auto", padding: "20px" }}>
       <h2>Invoices</h2>
 
       <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
@@ -575,35 +803,244 @@ export default function Invoice() {
         >
           {showCreateForm ? "Cancel" : "Create Invoice"}
         </button>
-        <button
-          onClick={toggleEditItems}
-          style={{
-            padding: "10px 20px",
-            background: "#475569",
-            color: "white",
-            border: "none",
-            borderRadius: "5px",
-            cursor: "pointer",
-          }}
-        >
-          {showEditItems ? "Close Items" : "Edit Item"}
-        </button>
-        <button
-          onClick={toggleClients}
-          style={{
-            padding: "10px 20px",
-            background: "#64748b",
-            color: "white",
-            border: "none",
-            borderRadius: "5px",
-            cursor: "pointer",
-          }}
-        >
-          {showClients ? "Close Clients" : "Client"}
-        </button>
+        {isAdmin && (
+          <>
+            <button
+              onClick={toggleEditItems}
+              style={{
+                padding: "10px 20px",
+                background: "#475569",
+                color: "white",
+                border: "none",
+                borderRadius: "5px",
+                cursor: "pointer",
+              }}
+            >
+              {showEditItems ? "Close Items" : "Edit Item"}
+            </button>
+            <button
+              onClick={toggleClients}
+              style={{
+                padding: "10px 20px",
+                background: "#64748b",
+                color: "white",
+                border: "none",
+                borderRadius: "5px",
+                cursor: "pointer",
+              }}
+            >
+              {showClients ? "Close Clients" : "Client"}
+            </button>
+            <button
+              onClick={toggleStock}
+              style={{
+                padding: "10px 20px",
+                background: "#0f766e",
+                color: "white",
+                border: "none",
+                borderRadius: "5px",
+                cursor: "pointer",
+              }}
+            >
+              {showStock ? "Close Stock" : "Stock Check"}
+            </button>
+          </>
+        )}
       </div>
 
-      {showClients && (
+      {isAdmin && showStock && (
+      <section style={{ border: "1px solid #d7dbe2", padding: "20px", borderRadius: "8px", marginBottom: "30px", background: "#ffffff" }}>
+        <h3 style={{ margin: "0 0 16px", fontSize: "1.25rem" }}>Stock Check</h3>
+        {stockMessage && <p style={{ marginBottom: "12px", color: "#475569" }}>{stockMessage}</p>}
+
+        {stockRows.length === 0 ? (
+          <p>No products yet. Create items first.</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+          <div style={{ display: "grid", gap: "0", minWidth: "1038px" }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: stockGridColumns,
+                columnGap: "12px",
+                alignItems: "center",
+                padding: "0 0 10px",
+                borderBottom: "1px solid #e2e8f0",
+                color: "#0f172a",
+                fontSize: "0.9rem",
+                fontWeight: 700,
+              }}
+            >
+              <span>Item</span>
+              <span style={{ textAlign: "right" }}>Stock</span>
+              <span>Qty</span>
+              <span>Comment</span>
+              <span style={{ textAlign: "center" }}>History</span>
+              <span style={{ textAlign: "center" }}>In</span>
+              <span style={{ textAlign: "center" }}>Out</span>
+            </div>
+            {stockRows.map((row) => (
+              <div
+                key={row.product_id}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: stockGridColumns,
+                  columnGap: "12px",
+                  alignItems: "center",
+                  minHeight: "56px",
+                  padding: "8px 0",
+                  borderBottom: "1px solid #eef2f7",
+                }}
+              >
+                <span style={{ lineHeight: 1.25 }}>{row.item}</span>
+                <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                  {Number(row.stock_quantity || 0).toFixed(2)}
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="Qty"
+                  value={stockInputs[row.product_id] || ""}
+                  onChange={(e) => handleStockInputChange(row.product_id, e.target.value)}
+                  style={stockInputStyle}
+                />
+                <input
+                  placeholder="Comment"
+                  value={stockComments[row.product_id] || ""}
+                  onChange={(e) => handleStockCommentChange(row.product_id, e.target.value)}
+                  style={stockInputStyle}
+                />
+                <button
+                  type="button"
+                  onClick={() => fetchStockHistory(row.product_id)}
+                  style={{
+                    ...stockButtonStyle,
+                    background: "#475569",
+                  }}
+                >
+                  View
+                </button>
+                <button
+                  type="button"
+                  onClick={() => addStock(row.product_id)}
+                  style={{
+                    ...stockButtonStyle,
+                    background: "#0f766e",
+                  }}
+                >
+                  Stock In
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeStock(row.product_id)}
+                  style={{
+                    ...stockButtonStyle,
+                    background: "#b42318",
+                  }}
+                >
+                  Stock Out
+                </button>
+              </div>
+            ))}
+          </div>
+          </div>
+        )}
+
+        {selectedHistoryProductId && (
+          <div style={{ marginTop: "24px", borderTop: "1px solid #e2e8f0", paddingTop: "18px" }}>
+            <h4 style={{ margin: "0 0 12px" }}>Stock history: {stockHistoryItem}</h4>
+            {stockHistory.length === 0 ? (
+              <p>No stock history yet.</p>
+            ) : (
+              <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", border: "1px solid #ccc" }}>
+                <colgroup>
+                  <col style={{ width: "20%" }} />
+                  <col style={{ width: "13%" }} />
+                  <col style={{ width: "9%" }} />
+                  <col style={{ width: "10%" }} />
+                  <col style={{ width: "28%" }} />
+                  <col style={{ width: "20%" }} />
+                </colgroup>
+                <thead>
+                  <tr style={{ background: "#0f766e", color: "white" }}>
+                    <th style={{ padding: "10px", textAlign: "left" }}>Time</th>
+                    <th style={{ padding: "10px", textAlign: "left" }}>Action</th>
+                    <th style={{ padding: "10px", textAlign: "right" }}>Change</th>
+                    <th style={{ padding: "10px", textAlign: "right" }}>Stock after</th>
+                    <th style={{ padding: "10px", textAlign: "left" }}>Comment</th>
+                    <th style={{ padding: "10px", textAlign: "left" }}>By</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleStockHistory.map((entry) => (
+                    <tr key={entry.id} style={{ borderBottom: "1px solid #ccc" }}>
+                      <td style={{ padding: "10px", wordBreak: "break-word" }}>{entry.created_at}</td>
+                      <td style={{ padding: "10px", wordBreak: "break-word" }}>{entry.action_type}</td>
+                      <td style={{ padding: "10px", textAlign: "right" }}>
+                        {Number(entry.change_quantity || 0).toFixed(2)}
+                      </td>
+                      <td style={{ padding: "10px", textAlign: "right" }}>
+                        {Number(entry.stock_after || 0).toFixed(2)}
+                      </td>
+                      <td style={{ padding: "10px", wordBreak: "break-word" }}>{entry.comment || "-"}</td>
+                      <td style={{ padding: "10px", wordBreak: "break-word" }}>{entry.created_by || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {stockHistory.length > STOCK_HISTORY_PAGE_SIZE && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "flex-end",
+                  gap: "10px",
+                  marginTop: "12px",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setStockHistoryPage((page) => Math.max(1, page - 1))}
+                  disabled={stockHistoryPage === 1}
+                  style={{
+                    padding: "8px 12px",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "6px",
+                    background: stockHistoryPage === 1 ? "#f1f5f9" : "#ffffff",
+                    color: stockHistoryPage === 1 ? "#94a3b8" : "#334155",
+                    cursor: stockHistoryPage === 1 ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Previous
+                </button>
+                <span style={{ color: "#475569", fontSize: "0.9rem" }}>
+                  Page {stockHistoryPage} of {stockHistoryPageCount}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setStockHistoryPage((page) => Math.min(stockHistoryPageCount, page + 1))}
+                  disabled={stockHistoryPage === stockHistoryPageCount}
+                  style={{
+                    padding: "8px 12px",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "6px",
+                    background: stockHistoryPage === stockHistoryPageCount ? "#f1f5f9" : "#ffffff",
+                    color: stockHistoryPage === stockHistoryPageCount ? "#94a3b8" : "#334155",
+                    cursor: stockHistoryPage === stockHistoryPageCount ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Next
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+      )}
+
+      {isAdmin && showClients && (
       <section style={{ border: "1px solid #ccc", padding: "20px", borderRadius: "5px", marginBottom: "30px" }}>
         <h3>Client</h3>
         <form
@@ -693,12 +1130,12 @@ export default function Invoice() {
       </section>
       )}
 
-      {showEditItems && (
+      {isAdmin && showEditItems && (
       <section style={{ border: "1px solid #ccc", padding: "20px", borderRadius: "5px", marginBottom: "30px" }}>
         <h3>Create Item</h3>
         <form
           onSubmit={createProduct}
-          style={{ display: "grid", gridTemplateColumns: "2fr 1fr auto", gap: "10px", marginBottom: "18px" }}
+          style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1.5fr auto", gap: "10px", marginBottom: "18px" }}
         >
           <input
             name="item"
@@ -716,6 +1153,23 @@ export default function Invoice() {
             value={newProduct.unit_price}
             onChange={handleNewProductChange}
             required
+            style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px" }}
+          />
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            name="stock_quantity"
+            placeholder="Initial Stock"
+            value={newProduct.stock_quantity}
+            onChange={handleNewProductChange}
+            style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px" }}
+          />
+          <input
+            name="stock_comment"
+            placeholder="Stock comment"
+            value={newProduct.stock_comment}
+            onChange={handleNewProductChange}
             style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px" }}
           />
           <button
@@ -738,66 +1192,87 @@ export default function Invoice() {
         {products.length === 0 ? (
           <p>No products yet. Create one above to use it in invoices.</p>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 2fr 1fr auto auto", gap: "10px", alignItems: "center" }}>
-            <select
-              value={selectedProductId}
-              onChange={(e) => setSelectedProductId(e.target.value)}
-              style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: "white" }}
-            >
-              <option value="">Select item to edit</option>
-              {products.map((product) => (
-                <option key={product.id} value={product.id}>
-                  {product.item}
-                </option>
-              ))}
-            </select>
-            <input
-              placeholder="Item name"
-              value={selectedProduct?.item ?? ""}
-              disabled={!selectedProduct}
-              onChange={(e) => handleProductChange(selectedProduct.id, "item", e.target.value)}
-              style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: selectedProduct ? "white" : "#f0f0f0" }}
-            />
-            <input
-              type="number"
-              step="0.01"
-              placeholder="Unit Price /pkg"
-              value={selectedProduct?.unit_price ?? ""}
-              disabled={!selectedProduct}
-              onChange={(e) => handleProductChange(selectedProduct.id, "unit_price", e.target.value)}
-              style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: selectedProduct ? "white" : "#f0f0f0" }}
-            />
-            <button
-              type="button"
-              disabled={!selectedProduct}
-              onClick={() => updateProduct(selectedProduct)}
+          <div>
+            <div
               style={{
-                padding: "10px 16px",
-                background: selectedProduct ? "#10b981" : "#94a3b8",
-                color: "white",
-                border: "none",
-                borderRadius: "5px",
-                cursor: selectedProduct ? "pointer" : "not-allowed",
+                display: "grid",
+                gridTemplateColumns: productEditGridColumns,
+                gap: "10px",
+                marginBottom: "6px",
+                color: "#334155",
+                fontSize: "0.85rem",
+                fontWeight: 700,
               }}
             >
-              Save
-            </button>
-            <button
-              type="button"
-              disabled={!selectedProduct}
-              onClick={() => deleteProduct(selectedProduct.id, selectedProduct.item)}
-              style={{
-                padding: "10px 16px",
-                background: selectedProduct ? "#dc2626" : "#94a3b8",
-                color: "white",
-                border: "none",
-                borderRadius: "5px",
-                cursor: selectedProduct ? "pointer" : "not-allowed",
-              }}
-            >
-              Delete
-            </button>
-            <p style={{ gridColumn: "1 / -1", margin: 0, color: "#64748b", fontSize: "0.9rem" }}>
+              <span></span>
+              <span style={{ justifySelf: "start" }}>Item name</span>
+              <span style={{ justifySelf: "start" }}>Unit price</span>
+              <span></span>
+              <span></span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: productEditGridColumns, gap: "10px", alignItems: "center" }}>
+              <select
+                value={selectedProductId}
+                onChange={(e) => setSelectedProductId(e.target.value)}
+                style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: "white" }}
+              >
+                <option value="">Select item to edit</option>
+                {products.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.item}
+                  </option>
+                ))}
+              </select>
+              <input
+                placeholder="Item name"
+                value={selectedProduct?.item ?? ""}
+                disabled={!selectedProduct}
+                onChange={(e) => handleProductChange(selectedProduct.id, "item", e.target.value)}
+                style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: selectedProduct ? "white" : "#f0f0f0" }}
+              />
+              <input
+                type="number"
+                step="0.01"
+                placeholder="Unit Price /pkg"
+                value={selectedProduct?.unit_price ?? ""}
+                disabled={!selectedProduct}
+                onChange={(e) => handleProductChange(selectedProduct.id, "unit_price", e.target.value)}
+                style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: selectedProduct ? "white" : "#f0f0f0" }}
+              />
+              <button
+                type="button"
+                disabled={!selectedProduct}
+                onClick={() => updateProduct(selectedProduct)}
+                style={{
+                  padding: "10px 16px",
+                  width: "100%",
+                  background: selectedProduct ? "#10b981" : "#94a3b8",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "5px",
+                  cursor: selectedProduct ? "pointer" : "not-allowed",
+                }}
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                disabled={!selectedProduct}
+                onClick={() => deleteProduct(selectedProduct.id, selectedProduct.item)}
+                style={{
+                  padding: "10px 16px",
+                  width: "100%",
+                  background: selectedProduct ? "#dc2626" : "#94a3b8",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "5px",
+                  cursor: selectedProduct ? "pointer" : "not-allowed",
+                }}
+              >
+                Delete
+              </button>
+            </div>
+            <p style={{ margin: "10px 0 0", color: "#64748b", fontSize: "0.9rem" }}>
               Last updated: {formatUpdatedAt(selectedProduct?.updated_at)}
             </p>
           </div>
@@ -848,17 +1323,34 @@ export default function Invoice() {
 
             <h4>Invoice Items</h4>
             <div style={{ marginBottom: "15px" }}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "2fr 1fr 1fr 1fr auto",
+                  gap: "10px",
+                  marginBottom: "6px",
+                  color: "#334155",
+                  fontSize: "0.85rem",
+                  fontWeight: 700,
+                }}
+              >
+                <span>Item</span>
+                <span>Quantity</span>
+                <span>Unit price</span>
+                <span>Amount</span>
+                <span></span>
+              </div>
               {formData.items.map((item, index) => (
-                <div key={index} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: "10px", marginBottom: "10px" }}>
+                <div key={index} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr auto", gap: "10px", marginBottom: "10px" }}>
                   <select
-                    value={item.description}
+                    value={item.product_id}
                     onChange={(e) => handleInvoiceItemSelect(index, e.target.value)}
                     style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: "white" }}
                   >
                     <option value="">{products.length ? "Select item" : "Create products first"}</option>
                     {products.map((product) => (
-                      <option key={product.id} value={product.item}>
-                        {product.item}
+                      <option key={product.id} value={product.id}>
+                        {product.item} ({Number(product.stock_quantity || 0).toFixed(2)} in stock)
                       </option>
                     ))}
                   </select>
@@ -873,8 +1365,8 @@ export default function Invoice() {
                     type="number"
                     placeholder="Unit Price /pkg"
                     value={item.unit_price}
-                    onChange={(e) => handleItemChange(index, "unit_price", e.target.value)}
-                    style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px" }}
+                    readOnly
+                    style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: "#f0f0f0", color: "#475569" }}
                   />
                   <input
                     type="number"
@@ -883,6 +1375,20 @@ export default function Invoice() {
                     disabled
                     style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: "#f0f0f0" }}
                   />
+                  <button
+                    type="button"
+                    onClick={() => deleteItem(index)}
+                    style={{
+                      padding: "10px 14px",
+                      background: "#dc2626",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "5px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Delete
+                  </button>
                 </div>
               ))}
               <button
@@ -958,20 +1464,22 @@ export default function Invoice() {
                   >
                     Download PDF
                   </button>
-                  <button
-                    onClick={() => deleteInvoice(inv.id, inv.invoice_number)}
-                    style={{
-                      padding: "8px 15px",
-                      background: "#dc2626",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "5px",
-                      cursor: "pointer",
-                      marginLeft: "8px",
-                    }}
-                  >
-                    Delete
-                  </button>
+                  {isAdmin && (
+                    <button
+                      onClick={() => deleteInvoice(inv.id, inv.invoice_number)}
+                      style={{
+                        padding: "8px 15px",
+                        background: "#dc2626",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "5px",
+                        cursor: "pointer",
+                        marginLeft: "8px",
+                      }}
+                    >
+                      Delete
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
