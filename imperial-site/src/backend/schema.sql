@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS users (
     last_name TEXT,
     phone TEXT,
     address TEXT,
+    account_type TEXT DEFAULT 'User' CHECK (account_type IN ('Admin', 'Staff', 'User', 'Wholesale Customer')),
     email TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

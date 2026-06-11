@@ -40,6 +40,11 @@ const formatUpdatedAt = (value) => {
   });
 };
 
+const getAuthHeaders = () => {
+  const token = localStorage.getItem("token");
+  return token ? { Authorization: token } : {};
+};
+
 const generateInvoiceNumber = (invoices, date = new Date()) => {
   const year = String(date.getFullYear()).slice(-2);
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -91,16 +96,43 @@ export default function Invoice() {
       return;
     }
 
-    // Get user_id from token or use a default for now
-    setUserId(1);
-    fetchInvoices(1);
-    fetchProducts();
-    fetchClients();
+    const loadInvoicePage = async () => {
+      try {
+        const res = await fetch("http://127.0.0.1:5000/account", {
+          headers: getAuthHeaders(),
+        });
+        const account = await res.json();
+
+        if (res.status === 401) {
+          localStorage.removeItem("token");
+          window.location.href = "/imperial-site/login";
+          return;
+        }
+
+        if (!res.ok || account.account_type !== "Admin") {
+          alert("Admin access required.");
+          window.location.href = "/imperial-site/account";
+          return;
+        }
+
+        setUserId(account.id);
+        fetchInvoices(account.id);
+        fetchProducts();
+        fetchClients();
+      } catch (err) {
+        alert("Failed to check account access: " + err.message);
+        window.location.href = "/imperial-site/account";
+      }
+    };
+
+    loadInvoicePage();
   }, []);
 
   const fetchInvoices = async (userId) => {
     try {
-      const res = await fetch(`http://127.0.0.1:5000/invoices/${userId}`);
+      const res = await fetch(`http://127.0.0.1:5000/invoices/${userId}`, {
+        headers: getAuthHeaders(),
+      });
       const data = await res.json();
       setInvoices(data);
       setFormData((prev) =>
@@ -115,7 +147,9 @@ export default function Invoice() {
 
   const fetchProducts = async () => {
     try {
-      const res = await fetch("http://127.0.0.1:5000/products");
+      const res = await fetch("http://127.0.0.1:5000/products", {
+        headers: getAuthHeaders(),
+      });
       const data = await res.json();
 
       if (res.ok) {
@@ -130,7 +164,9 @@ export default function Invoice() {
 
   const fetchClients = async () => {
     try {
-      const res = await fetch("http://127.0.0.1:5000/clients");
+      const res = await fetch("http://127.0.0.1:5000/clients", {
+        headers: getAuthHeaders(),
+      });
       const data = await res.json();
 
       if (res.ok) {
@@ -217,7 +253,7 @@ export default function Invoice() {
     try {
       const res = await fetch("http://127.0.0.1:5000/clients", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify(newClient),
       });
       const data = await res.json();
@@ -240,7 +276,7 @@ export default function Invoice() {
     try {
       const res = await fetch(`http://127.0.0.1:5000/clients/${client.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({ client_name: client.client_name }),
       });
       const data = await res.json();
@@ -272,6 +308,7 @@ export default function Invoice() {
     try {
       const res = await fetch(`http://127.0.0.1:5000/clients/${clientId}`, {
         method: "DELETE",
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
 
@@ -296,7 +333,7 @@ export default function Invoice() {
     try {
       const res = await fetch("http://127.0.0.1:5000/products", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify(newProduct),
       });
       const data = await res.json();
@@ -319,7 +356,7 @@ export default function Invoice() {
     try {
       const res = await fetch(`http://127.0.0.1:5000/products/${product.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({
           item: product.item,
           unit_price: product.unit_price,
@@ -354,6 +391,7 @@ export default function Invoice() {
     try {
       const res = await fetch(`http://127.0.0.1:5000/products/${productId}`, {
         method: "DELETE",
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
 
@@ -418,7 +456,7 @@ export default function Invoice() {
     try {
       const res = await fetch("http://127.0.0.1:5000/invoices", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify(invoiceData),
       });
 
@@ -439,8 +477,30 @@ export default function Invoice() {
     }
   };
 
-  const downloadPDF = (invoiceId, invoiceNumber) => {
-    window.location.href = `http://127.0.0.1:5000/invoices/${invoiceId}/pdf`;
+  const downloadPDF = async (invoiceId, invoiceNumber) => {
+    try {
+      const res = await fetch(`http://127.0.0.1:5000/invoices/${invoiceId}/pdf`, {
+        headers: getAuthHeaders(),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(`Error: ${data.error || "Failed to download PDF"}`);
+        return;
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `invoice_${invoiceNumber}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      alert("Failed to download PDF: " + err.message);
+    }
   };
 
   const deleteInvoice = async (invoiceId, invoiceNumber) => {
@@ -453,6 +513,7 @@ export default function Invoice() {
     try {
       const res = await fetch(`http://127.0.0.1:5000/invoices/${invoiceId}`, {
         method: "DELETE",
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
 

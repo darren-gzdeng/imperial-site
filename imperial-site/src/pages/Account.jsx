@@ -238,25 +238,26 @@ export default function Account() {
         <form onSubmit={handleAccountSave}>
           <div style={styles.detailsForm}>
             <label style={styles.field}>
-              <span style={styles.label}>User ID</span>
-              <input
-                value={formData.id}
-                disabled
-                style={{ ...styles.input, ...styles.disabledInput }}
-              />
-            </label>
-
-            <label style={styles.field}>
               <span style={styles.label}>Email</span>
               <input
                 type="email"
                 name="email"
                 value={formData.email}
-                onChange={handleAccountChange}
-                required
-                style={styles.input}
+                disabled
+                style={{ ...styles.input, ...styles.disabledInput }}
               />
             </label>
+
+            {formData.account_type === "Admin" && (
+              <label style={styles.field}>
+                <span style={styles.label}>Account type</span>
+                <input
+                  value={formData.account_type}
+                  disabled
+                  style={{ ...styles.input, ...styles.disabledInput }}
+                />
+              </label>
+            )}
 
             <label style={styles.field}>
               <span style={styles.label}>First name</span>

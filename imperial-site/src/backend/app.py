@@ -78,6 +78,14 @@ def init_db():
         cursor.execute("ALTER TABLE users ADD COLUMN phone TEXT")
     if "address" not in user_columns:
         cursor.execute("ALTER TABLE users ADD COLUMN address TEXT")
+    if "account_type" not in user_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN account_type TEXT DEFAULT 'User'")
+        cursor.execute("UPDATE users SET account_type = 'User' WHERE account_type IS NULL OR account_type = ''")
+        cursor.execute("""
+            UPDATE users
+            SET account_type = 'Admin'
+            WHERE id = (SELECT MIN(id) FROM users)
+        """)
     if "created_at" not in user_columns:
         cursor.execute("ALTER TABLE users ADD COLUMN created_at TIMESTAMP")
         cursor.execute("UPDATE users SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
@@ -274,7 +282,7 @@ def login():
 
     try:
         cursor.execute(
-            "SELECT * FROM users WHERE email=? AND password=?",
+            "SELECT id, account_type FROM users WHERE email=? AND password=?",
             (email, hash_password(password))
         )
 
@@ -285,6 +293,7 @@ def login():
 
         token = jwt.encode({
             "user_id": user[0],
+            "account_type": user[1] or "User",
             "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1)
         }, app.config['SECRET_KEY'], algorithm="HS256")
 
@@ -323,7 +332,7 @@ def google_login():
 
         try:
             # Check if user exists
-            cursor.execute("SELECT * FROM users WHERE email=?", (email,))
+            cursor.execute("SELECT id, account_type FROM users WHERE email=?", (email,))
             user = cursor.fetchone()
 
             if not user:
@@ -335,13 +344,14 @@ def google_login():
                     (first_name, last_name, email, hash_password(email + "_google"))
                 )
                 conn.commit()
-                cursor.execute("SELECT * FROM users WHERE email=?", (email,))
+                cursor.execute("SELECT id, account_type FROM users WHERE email=?", (email,))
                 user = cursor.fetchone()
 
             # Generate JWT token
             auth_token = jwt.encode({
                 "user_id": user[0],
                 "email": email,
+                "account_type": user[1] or "User",
                 "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1)
             }, app.config['SECRET_KEY'], algorithm="HS256")
 
@@ -421,6 +431,30 @@ def token_required(f):
     return decorated
 
 
+def admin_required(f):
+    @wraps(f)
+    @token_required
+    def decorated(user, *args, **kwargs):
+        conn = get_db()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute("SELECT account_type FROM users WHERE id=?", (user["user_id"],))
+            account = cursor.fetchone()
+        finally:
+            conn.close()
+
+        if not account:
+            return jsonify({"error": "User not found"}), 404
+
+        if account[0] != "Admin":
+            return jsonify({"error": "Admin access required"}), 403
+
+        return f(user, *args, **kwargs)
+
+    return decorated
+
+
 # -------------------------
 # Protected route
 # -------------------------
@@ -434,7 +468,8 @@ def dashboard(user):
 # Products
 # -------------------------
 @app.route('/products', methods=['GET'])
-def get_products():
+@admin_required
+def get_products(user):
     conn = get_db()
     cursor = conn.cursor()
 
@@ -462,7 +497,8 @@ def get_products():
 
 
 @app.route('/products', methods=['POST'])
-def create_product():
+@admin_required
+def create_product(user):
     data = request.json or {}
 
     item = (data.get("item") or "").strip()
@@ -500,7 +536,8 @@ def create_product():
 
 
 @app.route('/products/<int:product_id>', methods=['PUT'])
-def update_product(product_id):
+@admin_required
+def update_product(user, product_id):
     data = request.json or {}
 
     item = (data.get("item") or "").strip()
@@ -540,7 +577,8 @@ def update_product(product_id):
 
 
 @app.route('/products/<int:product_id>', methods=['DELETE'])
-def delete_product(product_id):
+@admin_required
+def delete_product(user, product_id):
     conn = get_db()
     cursor = conn.cursor()
 
@@ -560,7 +598,8 @@ def delete_product(product_id):
 # Clients
 # -------------------------
 @app.route('/clients', methods=['GET'])
-def get_clients():
+@admin_required
+def get_clients(user):
     conn = get_db()
     cursor = conn.cursor()
 
@@ -580,7 +619,8 @@ def get_clients():
 
 
 @app.route('/clients', methods=['POST'])
-def create_client():
+@admin_required
+def create_client(user):
     data = request.json or {}
     client_name = (data.get("client_name") or "").strip()
 
@@ -601,7 +641,8 @@ def create_client():
 
 
 @app.route('/clients/<int:client_id>', methods=['PUT'])
-def update_client(client_id):
+@admin_required
+def update_client(user, client_id):
     data = request.json or {}
     client_name = (data.get("client_name") or "").strip()
 
@@ -626,7 +667,8 @@ def update_client(client_id):
 
 
 @app.route('/clients/<int:client_id>', methods=['DELETE'])
-def delete_client(client_id):
+@admin_required
+def delete_client(user, client_id):
     conn = get_db()
     cursor = conn.cursor()
 
@@ -653,7 +695,7 @@ def get_account(user):
 
     try:
         cursor.execute("""
-            SELECT id, first_name, last_name, email, phone, address, created_at
+            SELECT id, first_name, last_name, email, phone, address, account_type, created_at
             FROM users
             WHERE id=?
         """, (user["user_id"],))
@@ -669,7 +711,8 @@ def get_account(user):
             "email": account[3],
             "phone": account[4] or "",
             "address": account[5] or "",
-            "created_at": account[6],
+            "account_type": account[6] or "User",
+            "created_at": account[7],
         })
     finally:
         conn.close()
@@ -714,7 +757,8 @@ def update_account(user):
 # Create Invoice
 # -------------------------
 @app.route('/invoices', methods=['POST'])
-def create_invoice():
+@admin_required
+def create_invoice(user):
     try:
         data = request.json
         
@@ -759,15 +803,16 @@ def create_invoice():
 
 
 # -------------------------
-# Get User Invoices
+# Get Invoices
 # -------------------------
 @app.route('/invoices/<int:user_id>', methods=['GET'])
-def get_invoices(user_id):
+@admin_required
+def get_invoices(user, user_id):
     conn = get_db()
     cursor = conn.cursor()
 
     try:
-        cursor.execute("SELECT * FROM invoices WHERE user_id=? ORDER BY created_at DESC", (user_id,))
+        cursor.execute("SELECT * FROM invoices ORDER BY created_at DESC")
         invoices = cursor.fetchall()
         
         invoice_list = []
@@ -796,7 +841,8 @@ def get_invoices(user_id):
 # Delete Invoice
 # -------------------------
 @app.route('/invoices/<int:invoice_id>', methods=['DELETE'])
-def delete_invoice(invoice_id):
+@admin_required
+def delete_invoice(user, invoice_id):
     conn = get_db()
     cursor = conn.cursor()
 
@@ -816,7 +862,8 @@ def delete_invoice(invoice_id):
 # Generate Invoice PDF
 # -------------------------
 @app.route('/invoices/<int:invoice_id>/pdf', methods=['GET'])
-def generate_invoice_pdf(invoice_id):
+@admin_required
+def generate_invoice_pdf(user, invoice_id):
     conn = get_db()
     cursor = conn.cursor()
 
@@ -1061,20 +1108,21 @@ def generate_invoice_pdf(invoice_id):
         before_items_space = max(0.45, 1.25 - (0.08 * max(0, item_count - 1)))
         elements.append(Spacer(1, before_items_space * inch))
 
-        table_data = [["Item", "Quantity", "Unit Price", "GST", "Amount AUD"]]
+        table_data = [["Item", "Quantity", "Unit Price", "Amount AUD"]]
         for item in items:
+            item_amount = float(item.get('amount', 0))
             table_data.append([
                 item.get("description", ""),
                 f"{float(item.get('quantity', 0)):.2f}",
                 f"{float(item.get('unit_price', 0)):.2f}",
-                "10%",
-                f"{float(item.get('amount', 0)):.2f}",
+                f"{item_amount:.2f}",
             ])
 
-        items_table = Table(table_data, colWidths=[4.0 * inch, 0.85 * inch, 0.9 * inch, 0.55 * inch, 1.2 * inch])
+        items_table = Table(table_data, colWidths=[4.25 * inch, 1.0 * inch, 1.05 * inch, 1.2 * inch])
         items_table.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('FONTSIZE', (0, 0), (-1, 0), 8.5),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
             ('TEXTCOLOR', (0, 0), (-1, -1), black),
             ('LINEBELOW', (0, 0), (-1, 0), 1, black),
             ('LINEBELOW', (0, 1), (-1, -1), 0.35, light_line),
