@@ -37,110 +37,36 @@ const products = [
   },
 ];
 
-const styles = {
-  page: {
-    color: "#1b1d22",
-  },
-  header: {
-    maxWidth: "760px",
-    marginBottom: "34px",
-  },
-  title: {
-    margin: "0 0 12px",
-    fontSize: "2.75rem",
-    fontWeight: 400,
-    lineHeight: 1,
-    letterSpacing: "-0.06em",
-  },
-  intro: {
-    margin: 0,
-    color: "#5b5f66",
-    fontSize: "1rem",
-    lineHeight: 1.6,
-  },
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-    gap: "22px",
-  },
-  card: {
-    border: "1px solid #d9dde5",
-    borderRadius: "8px",
-    overflow: "hidden",
-    background: "#ffffff",
-  },
-  imageWrap: {
-    height: "190px",
-    background: "#f5f6f8",
-  },
-  image: {
-    display: "block",
-    width: "100%",
-    height: "100%",
-    objectFit: "cover",
-  },
-  content: {
-    padding: "18px",
-  },
-  productName: {
-    margin: "0 0 8px",
-    fontSize: "1.2rem",
-    fontWeight: 600,
-  },
-  description: {
-    minHeight: "88px",
-    margin: "0 0 18px",
-    color: "#5b5f66",
-    fontSize: "0.92rem",
-    lineHeight: 1.55,
-  },
-  facts: {
-    display: "grid",
-    gap: "10px",
-    margin: 0,
-    padding: 0,
-    listStyle: "none",
-    color: "#3f434a",
-    fontSize: "0.9rem",
-  },
-  factLabel: {
-    display: "inline-block",
-    minWidth: "78px",
-    color: "#6b7280",
-    fontWeight: 600,
-  },
-};
-
 export default function Products() {
   return (
-    <section style={styles.page}>
-      <div style={styles.header}>
-        <h1 style={styles.title}>Products</h1>
-        <p style={styles.intro}>
+    <section className="catalog-page">
+      <div className="catalog-header">
+        <h1 className="catalog-title">Products</h1>
+        <p className="catalog-intro">
           Browse product details including descriptions, SKU, weight, and current price information.
         </p>
       </div>
 
-      <div style={styles.grid}>
+      <div className="product-grid">
         {products.map((product) => (
-          <article key={product.id} style={styles.card}>
-            <div style={styles.imageWrap}>
-              <img src={product.image} alt={product.name} style={styles.image} />
+          <article key={product.id} className="product-card">
+            <div className="product-card__image-wrap">
+              <img src={product.image} alt={product.name} className="product-card__image" />
             </div>
-            <div style={styles.content}>
-              <h2 style={styles.productName}>{product.name}</h2>
-              <p style={styles.description}>{product.description}</p>
-              <ul style={styles.facts}>
+            <div className="product-card__content">
+              <h2 className="product-card__name">{product.name}</h2>
+              <p className="product-card__description">{product.description}</p>
+              <ul className="product-card__facts">
                 <li>
-                  <span style={styles.factLabel}>SKU</span>
+                  <span className="product-card__fact-label">SKU</span>
                   {product.sku}
                 </li>
                 <li>
-                  <span style={styles.factLabel}>Weight</span>
+                  <span className="product-card__fact-label">Weight</span>
                   {product.weight}
                 </li>
                 <li>
-                  <span style={styles.factLabel}>Price</span>
+                  <span className="product-card__fact-label">Price</span>
                   {product.unit_price}
                 </li>
               </ul>

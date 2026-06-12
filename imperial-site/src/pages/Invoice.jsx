@@ -1,4 +1,51 @@
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
+import { getAccount } from "../api/accountApi";
+import {
+  createClient as createClientApi,
+  deleteClient as deleteClientApi,
+  getClients,
+  updateClient as updateClientApi,
+} from "../api/clientsApi";
+import { clearAuthToken, getAuthToken } from "../api/client";
+import {
+  addStock as addStockApi,
+  getInventory,
+  getInventoryHistory,
+  removeStock as removeStockApi,
+} from "../api/inventoryApi";
+import {
+  createInvoice as createInvoiceApi,
+  deleteInvoice as deleteInvoiceApi,
+  downloadInvoicePdf,
+  getInvoices,
+} from "../api/invoicesApi";
+import {
+  createProduct as createProductApi,
+  deleteProduct as deleteProductApi,
+  getProducts,
+  updateProduct as updateProductApi,
+} from "../api/productsApi";
+import { PagePanel, PageShell, PageToolbar } from "../components/layout/PageShell";
+import ActionButton from "../components/ui/ActionButton";
+
+const STOCK_HISTORY_PAGE_SIZE = 8;
+const INVOICE_PAGE_SIZE = 10;
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const YEAR_RANGE = 12;
 
 const formatDateInput = (date) => {
   const year = date.getFullYear();
@@ -40,13 +87,6 @@ const formatUpdatedAt = (value) => {
   });
 };
 
-const getAuthHeaders = () => {
-  const token = localStorage.getItem("token");
-  return token ? { Authorization: token } : {};
-};
-
-const STOCK_HISTORY_PAGE_SIZE = 8;
-
 const generateInvoiceNumber = (invoices, date = new Date()) => {
   const year = String(date.getFullYear()).slice(-2);
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -65,18 +105,57 @@ const generateInvoiceNumber = (invoices, date = new Date()) => {
 
 const createInitialFormData = (invoices = []) => {
   const today = new Date();
-  const dueDate = formatDateInput(addDays(today, 7));
+
   return {
     invoice_number: generateInvoiceNumber(invoices, today),
     client_name: "",
     issue_date: formatDateInput(today),
-    due_date: dueDate,
+    due_date: formatDateInput(addDays(today, 7)),
     items: [{ product_id: "", description: "", quantity: 1, unit_price: 0, amount: 0 }],
   };
 };
 
+const sortClients = (clients) => [...clients].sort((a, b) => a.client_name.localeCompare(b.client_name));
+const sortProducts = (products) => [...products].sort((a, b) => a.item.localeCompare(b.item));
+
+const parseDateString = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  return new Date(year, month - 1, day);
+};
+
+const formatDateDisplay = (value) => {
+  const date = parseDateString(value);
+
+  if (!date) {
+    return "";
+  }
+
+  return date.toLocaleDateString("en-AU", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  });
+};
+
 export default function Invoice() {
+  const invoiceFilterRef = useRef(null);
+  const accessCheckStartedRef = useRef(false);
   const [invoices, setInvoices] = useState([]);
+  const [invoiceSearch, setInvoiceSearch] = useState("");
+  const [invoiceClientFilter, setInvoiceClientFilter] = useState("");
+  const [invoiceDateFrom, setInvoiceDateFrom] = useState("");
+  const [invoiceDateTo, setInvoiceDateTo] = useState("");
+  const [invoicePage, setInvoicePage] = useState(1);
+  const [openInvoiceDatePicker, setOpenInvoiceDatePicker] = useState(null);
+  const [invoiceCalendarMonth, setInvoiceCalendarMonth] = useState(new Date());
   const [products, setProducts] = useState([]);
   const [newProduct, setNewProduct] = useState({ item: "", unit_price: "", stock_quantity: "", stock_comment: "" });
   const [productMessage, setProductMessage] = useState("");
@@ -86,6 +165,8 @@ export default function Invoice() {
   const [stockComments, setStockComments] = useState({});
   const [stockHistory, setStockHistory] = useState([]);
   const [stockHistoryPage, setStockHistoryPage] = useState(1);
+  const [stockHistoryPageCount, setStockHistoryPageCount] = useState(1);
+  const [stockHistoryTotalCount, setStockHistoryTotalCount] = useState(0);
   const [stockHistoryItem, setStockHistoryItem] = useState("");
   const [selectedHistoryProductId, setSelectedHistoryProductId] = useState("");
   const [stockMessage, setStockMessage] = useState("");
@@ -93,356 +174,169 @@ export default function Invoice() {
   const [newClient, setNewClient] = useState({ client_name: "" });
   const [clientMessage, setClientMessage] = useState("");
   const [selectedClientId, setSelectedClientId] = useState("");
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [showEditItems, setShowEditItems] = useState(false);
-  const [showClients, setShowClients] = useState(false);
-  const [showStock, setShowStock] = useState(false);
+  const [activeView, setActiveView] = useState("menu");
   const [formData, setFormData] = useState(createInitialFormData());
-  const [user_id, setUserId] = useState(null);
+  const [userId, setUserId] = useState(null);
   const [accountType, setAccountType] = useState("");
+  const [isCreatingInvoice, setIsCreatingInvoice] = useState(false);
+  const [invoiceNotice, setInvoiceNotice] = useState(null);
+  const [invoiceDeleteTarget, setInvoiceDeleteTarget] = useState(null);
+  const [clientDeleteTarget, setClientDeleteTarget] = useState(null);
+  const [productDeleteTarget, setProductDeleteTarget] = useState(null);
+  const [isDeletingInvoice, setIsDeletingInvoice] = useState(false);
+  const [isDeletingClient, setIsDeletingClient] = useState(false);
+  const [isDeletingProduct, setIsDeletingProduct] = useState(false);
+
+  const isAdmin = accountType === "Admin";
+  const selectedProduct = products.find((product) => product.id === Number(selectedProductId));
+  const selectedClient = clients.find((client) => client.id === Number(selectedClientId));
+
+  const loadInvoices = async (accountId) => {
+    try {
+      const data = await getInvoices(accountId);
+      setInvoices(data);
+      setFormData((prev) => (prev.client_name ? prev : createInitialFormData(data)));
+      return data;
+    } catch (err) {
+      console.error("Failed to fetch invoices:", err);
+      return [];
+    }
+  };
+
+  const loadProducts = async () => {
+    try {
+      setProducts(await getProducts());
+    } catch (err) {
+      setProductMessage("Failed to load products: " + err.message);
+    }
+  };
+
+  const loadClients = async () => {
+    try {
+      setClients(await getClients());
+    } catch (err) {
+      setClientMessage("Failed to load clients: " + err.message);
+    }
+  };
+
+  const loadStock = async () => {
+    try {
+      setStockRows(await getInventory());
+      setStockMessage("");
+    } catch (err) {
+      setStockMessage("Failed to load stock: " + err.message);
+    }
+  };
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) {
+    if (accessCheckStartedRef.current) {
+      return;
+    }
+
+    accessCheckStartedRef.current = true;
+
+    if (!getAuthToken()) {
       window.location.href = "/imperial-site/login";
       return;
     }
 
     const loadInvoicePage = async () => {
       try {
-        const res = await fetch("http://127.0.0.1:5000/account", {
-          headers: getAuthHeaders(),
-        });
-        const account = await res.json();
+        const account = await getAccount();
 
-        if (res.status === 401) {
-          localStorage.removeItem("token");
-          window.location.href = "/imperial-site/login";
-          return;
-        }
-
-        if (!res.ok || !["Admin", "Staff"].includes(account.account_type)) {
-          alert("Staff or admin access required.");
-          window.location.href = "/imperial-site/account";
+        if (!["Admin", "Staff"].includes(account.account_type)) {
+          setInvoiceNotice({
+            title: "Access denied",
+            message: "Staff or admin access required.",
+            redirectTo: "/imperial-site/account",
+          });
           return;
         }
 
         setUserId(account.id);
         setAccountType(account.account_type);
-        fetchInvoices(account.id);
-        fetchProducts();
-        fetchClients();
+        await Promise.all([loadInvoices(account.id), loadProducts(), loadClients()]);
+
         if (account.account_type === "Admin") {
-          fetchStock();
+          loadStock();
         }
       } catch (err) {
-        alert("Failed to check account access: " + err.message);
-        window.location.href = "/imperial-site/account";
+        if (err.status === 401) {
+          clearAuthToken();
+          window.location.href = "/imperial-site/login";
+          return;
+        }
+
+        setInvoiceNotice({
+          title: "Access check failed",
+          message: `Failed to check account access: ${err.message}`,
+          redirectTo: "/imperial-site/account",
+        });
       }
     };
 
     loadInvoicePage();
   }, []);
 
-  const fetchInvoices = async (userId) => {
-    try {
-      const res = await fetch(`http://127.0.0.1:5000/invoices/${userId}`, {
-        headers: getAuthHeaders(),
-      });
-      const data = await res.json();
-      setInvoices(data);
-      setFormData((prev) =>
-        prev.client_name
-          ? prev
-          : createInitialFormData(data)
-      );
-    } catch (err) {
-      console.error("Failed to fetch invoices:", err);
-    }
-  };
+  useEffect(() => {
+    setInvoicePage(1);
+  }, [invoiceSearch, invoiceClientFilter, invoiceDateFrom, invoiceDateTo]);
 
-  const fetchProducts = async () => {
-    try {
-      const res = await fetch("http://127.0.0.1:5000/products", {
-        headers: getAuthHeaders(),
-      });
-      const data = await res.json();
-
-      if (res.ok) {
-        setProducts(data);
-      } else {
-        setProductMessage(data.error || "Failed to load products");
+  useEffect(() => {
+    const closeDatePicker = (event) => {
+      if (!openInvoiceDatePicker) {
+        return;
       }
-    } catch (err) {
-      setProductMessage("Failed to load products: " + err.message);
-    }
-  };
 
-  const fetchStock = async () => {
-    try {
-      const res = await fetch("http://127.0.0.1:5000/inventory", {
-        headers: getAuthHeaders(),
-      });
-      const data = await res.json();
-
-      if (res.ok) {
-        setStockRows(data);
-        setStockMessage("");
-      } else {
-        setStockMessage(data.error || "Failed to load stock");
+      if (invoiceFilterRef.current && !invoiceFilterRef.current.contains(event.target)) {
+        setOpenInvoiceDatePicker(null);
       }
-    } catch (err) {
-      setStockMessage("Failed to load stock: " + err.message);
-    }
-  };
+    };
 
-  const fetchClients = async () => {
-    try {
-      const res = await fetch("http://127.0.0.1:5000/clients", {
-        headers: getAuthHeaders(),
-      });
-      const data = await res.json();
+    document.addEventListener("mousedown", closeDatePicker);
+    return () => document.removeEventListener("mousedown", closeDatePicker);
+  }, [openInvoiceDatePicker]);
 
-      if (res.ok) {
-        setClients(data);
-      } else {
-        setClientMessage(data.error || "Failed to load clients");
-      }
-    } catch (err) {
-      setClientMessage("Failed to load clients: " + err.message);
-    }
-  };
-
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-  };
-
-  const handleItemChange = (index, field, value) => {
-    const newItems = [...formData.items];
-    newItems[index][field] = field === "quantity" || field === "unit_price" ? parseFloat(value) : value;
-    
-    // Calculate amount
-    if (field === "quantity" || field === "unit_price") {
-      newItems[index].amount = newItems[index].quantity * newItems[index].unit_price;
-    }
-    
-    setFormData((prev) => ({ ...prev, items: newItems }));
-  };
-
-  const handleInvoiceItemSelect = (index, value) => {
-    const selectedProduct = products.find((product) => String(product.id) === String(value));
-    const newItems = [...formData.items];
-
-    newItems[index].product_id = value;
-    newItems[index].description = selectedProduct?.item || "";
-    if (selectedProduct) {
-      newItems[index].unit_price = selectedProduct.unit_price;
-      newItems[index].amount = newItems[index].quantity * selectedProduct.unit_price;
-    }
-
-    setFormData((prev) => ({ ...prev, items: newItems }));
-  };
-
-  const handleProductChange = (productId, field, value) => {
-    setProducts((prev) =>
-      prev.map((product) =>
-        product.id === productId ? { ...product, [field]: value } : product
-      )
-    );
-  };
-
-  const selectedProduct = products.find((product) => product.id === Number(selectedProductId));
-
-  const handleNewProductChange = (e) => {
-    const { name, value } = e.target;
-    setNewProduct((prev) => ({ ...prev, [name]: value }));
-  };
-
-  const selectedClient = clients.find((client) => client.id === Number(selectedClientId));
-
-  const handleClientChange = (clientId, value) => {
-    setClients((prev) =>
-      prev.map((client) =>
-        client.id === clientId ? { ...client, client_name: value } : client
-      )
-    );
-  };
-
-  const handleNewClientChange = (e) => {
-    const { name, value } = e.target;
-    setNewClient((prev) => ({ ...prev, [name]: value }));
+  const calculateTotals = () => {
+    const total = formData.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+    const subtotal = total / 1.1;
+    const tax = total - subtotal;
+    return { subtotal, tax, total };
   };
 
   const handleInvoiceClientSelect = (value) => {
-    setFormData((prev) => ({
-      ...prev,
-      client_name: value,
-    }));
+    setFormData((prev) => ({ ...prev, client_name: value }));
   };
 
-  const createClient = async (e) => {
-    e.preventDefault();
-    setClientMessage("");
+  const handleInvoiceItemSelect = (index, value) => {
+    const selected = products.find((product) => String(product.id) === String(value));
 
-    try {
-      const res = await fetch("http://127.0.0.1:5000/clients", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify(newClient),
-      });
-      const data = await res.json();
-
-      if (res.ok) {
-        setClients((prev) => [...prev, data].sort((a, b) => a.client_name.localeCompare(b.client_name)));
-        setNewClient({ client_name: "" });
-        setClientMessage("Client created.");
-      } else {
-        setClientMessage(data.error || "Failed to create client");
-      }
-    } catch (err) {
-      setClientMessage("Failed to create client: " + err.message);
-    }
+    setFormData((prev) => {
+      const items = [...prev.items];
+      const quantity = Number(items[index].quantity) || 0;
+      items[index] = {
+        ...items[index],
+        product_id: value,
+        description: selected?.item || "",
+        unit_price: selected ? Number(selected.unit_price) : 0,
+        amount: selected ? quantity * Number(selected.unit_price) : 0,
+      };
+      return { ...prev, items };
+    });
   };
 
-  const updateClient = async (client) => {
-    setClientMessage("");
+  const handleItemChange = (index, field, value) => {
+    setFormData((prev) => {
+      const items = [...prev.items];
+      const parsedValue = field === "quantity" || field === "unit_price" ? Number(value) : value;
+      items[index] = { ...items[index], [field]: parsedValue };
 
-    try {
-      const res = await fetch(`http://127.0.0.1:5000/clients/${client.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({ client_name: client.client_name }),
-      });
-      const data = await res.json();
-
-      if (res.ok) {
-        setClients((prev) =>
-          prev
-            .map((item) => (item.id === client.id ? { ...item, ...data } : item))
-            .sort((a, b) => a.client_name.localeCompare(b.client_name))
-        );
-        setClientMessage("Client updated.");
-      } else {
-        setClientMessage(data.error || "Failed to update client");
+      if (field === "quantity" || field === "unit_price") {
+        items[index].amount = (Number(items[index].quantity) || 0) * (Number(items[index].unit_price) || 0);
       }
-    } catch (err) {
-      setClientMessage("Failed to update client: " + err.message);
-    }
-  };
 
-  const deleteClient = async (clientId, clientName) => {
-    const confirmed = window.confirm(`Delete client ${clientName}? Existing invoices will not be changed.`);
-
-    if (!confirmed) {
-      return;
-    }
-
-    setClientMessage("");
-
-    try {
-      const res = await fetch(`http://127.0.0.1:5000/clients/${clientId}`, {
-        method: "DELETE",
-        headers: getAuthHeaders(),
-      });
-      const data = await res.json();
-
-      if (res.ok) {
-        setClients((prev) => prev.filter((client) => client.id !== clientId));
-        if (String(clientId) === String(selectedClientId)) {
-          setSelectedClientId("");
-        }
-        setClientMessage("Client deleted.");
-      } else {
-        setClientMessage(data.error || "Failed to delete client");
-      }
-    } catch (err) {
-      setClientMessage("Failed to delete client: " + err.message);
-    }
-  };
-
-  const createProduct = async (e) => {
-    e.preventDefault();
-    setProductMessage("");
-
-    try {
-      const res = await fetch("http://127.0.0.1:5000/products", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify(newProduct),
-      });
-      const data = await res.json();
-
-      if (res.ok) {
-        setProducts((prev) => [...prev, data].sort((a, b) => a.item.localeCompare(b.item)));
-        setNewProduct({ item: "", unit_price: "", stock_quantity: "", stock_comment: "" });
-        setProductMessage("Product created.");
-        fetchStock();
-      } else {
-        setProductMessage(data.error || "Failed to create product");
-      }
-    } catch (err) {
-      setProductMessage("Failed to create product: " + err.message);
-    }
-  };
-
-  const updateProduct = async (product) => {
-    setProductMessage("");
-
-    try {
-      const res = await fetch(`http://127.0.0.1:5000/products/${product.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({
-          item: product.item,
-          unit_price: product.unit_price,
-        }),
-      });
-      const data = await res.json();
-
-      if (res.ok) {
-        setProducts((prev) =>
-          prev
-            .map((item) => (item.id === product.id ? { ...item, ...data } : item))
-            .sort((a, b) => a.item.localeCompare(b.item))
-        );
-        setProductMessage("Product updated.");
-      } else {
-        setProductMessage(data.error || "Failed to update product");
-      }
-    } catch (err) {
-      setProductMessage("Failed to update product: " + err.message);
-    }
-  };
-
-  const deleteProduct = async (productId, itemName) => {
-    const confirmed = window.confirm(`Delete item ${itemName}? Existing invoices will not be changed.`);
-
-    if (!confirmed) {
-      return;
-    }
-
-    setProductMessage("");
-
-    try {
-      const res = await fetch(`http://127.0.0.1:5000/products/${productId}`, {
-        method: "DELETE",
-        headers: getAuthHeaders(),
-      });
-      const data = await res.json();
-
-      if (res.ok) {
-        setProducts((prev) => prev.filter((product) => product.id !== productId));
-        if (String(productId) === String(selectedProductId)) {
-          setSelectedProductId("");
-        }
-        setProductMessage("Product deleted.");
-      } else {
-        setProductMessage(data.error || "Failed to delete product");
-      }
-    } catch (err) {
-      setProductMessage("Failed to delete product: " + err.message);
-    }
+      return { ...prev, items };
+    });
   };
 
   const addItem = () => {
@@ -453,19 +347,151 @@ export default function Invoice() {
   };
 
   const deleteItem = (index) => {
-    setFormData((prev) => {
-      if (prev.items.length <= 1) {
-        return {
-          ...prev,
-          items: [{ product_id: "", description: "", quantity: 1, unit_price: 0, amount: 0 }],
-        };
-      }
+    setFormData((prev) => ({
+      ...prev,
+      items:
+        prev.items.length <= 1
+          ? [{ product_id: "", description: "", quantity: 1, unit_price: 0, amount: 0 }]
+          : prev.items.filter((_, itemIndex) => itemIndex !== index),
+    }));
+  };
 
-      return {
-        ...prev,
-        items: prev.items.filter((_, itemIndex) => itemIndex !== index),
-      };
-    });
+  const handleNewProductChange = (e) => {
+    const { name, value } = e.target;
+    setNewProduct((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleProductChange = (productId, field, value) => {
+    setProducts((prev) =>
+      prev.map((product) => (product.id === productId ? { ...product, [field]: value } : product))
+    );
+  };
+
+  const createProduct = async (e) => {
+    e.preventDefault();
+    setProductMessage("");
+
+    try {
+      const data = await createProductApi(newProduct);
+      setProducts((prev) => sortProducts([...prev, data]));
+      setNewProduct({ item: "", unit_price: "", stock_quantity: "", stock_comment: "" });
+      setProductMessage("Product created.");
+      if (isAdmin) {
+        loadStock();
+      }
+    } catch (err) {
+      setProductMessage("Failed to create product: " + err.message);
+    }
+  };
+
+  const updateProduct = async (product) => {
+    setProductMessage("");
+
+    try {
+      const data = await updateProductApi(product.id, {
+        item: product.item,
+        unit_price: product.unit_price,
+      });
+      setProducts((prev) => sortProducts(prev.map((item) => (item.id === product.id ? { ...item, ...data } : item))));
+      setProductMessage("Product updated.");
+    } catch (err) {
+      setProductMessage("Failed to update product: " + err.message);
+    }
+  };
+
+  const requestDeleteProduct = (product) => {
+    setProductDeleteTarget(product);
+  };
+
+  const confirmDeleteProduct = async () => {
+    if (!productDeleteTarget || isDeletingProduct) {
+      return;
+    }
+
+    const productId = productDeleteTarget.id;
+
+    setIsDeletingProduct(true);
+    setProductMessage("");
+
+    try {
+      await deleteProductApi(productId);
+      setProducts((prev) => prev.filter((product) => product.id !== productId));
+      if (String(productId) === String(selectedProductId)) {
+        setSelectedProductId("");
+      }
+      setProductMessage("Product deleted.");
+      setProductDeleteTarget(null);
+    } catch (err) {
+      setProductMessage("Failed to delete product: " + err.message);
+    } finally {
+      setIsDeletingProduct(false);
+    }
+  };
+
+  const handleNewClientChange = (e) => {
+    const { name, value } = e.target;
+    setNewClient((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleClientChange = (clientId, value) => {
+    setClients((prev) =>
+      prev.map((client) => (client.id === clientId ? { ...client, client_name: value } : client))
+    );
+  };
+
+  const createClient = async (e) => {
+    e.preventDefault();
+    setClientMessage("");
+
+    try {
+      const data = await createClientApi(newClient);
+      setClients((prev) => sortClients([...prev, data]));
+      setNewClient({ client_name: "" });
+      setClientMessage("Client created.");
+    } catch (err) {
+      setClientMessage("Failed to create client: " + err.message);
+    }
+  };
+
+  const updateClient = async (client) => {
+    setClientMessage("");
+
+    try {
+      const data = await updateClientApi(client.id, { client_name: client.client_name });
+      setClients((prev) => sortClients(prev.map((item) => (item.id === client.id ? { ...item, ...data } : item))));
+      setClientMessage("Client updated.");
+    } catch (err) {
+      setClientMessage("Failed to update client: " + err.message);
+    }
+  };
+
+  const requestDeleteClient = (client) => {
+    setClientDeleteTarget(client);
+  };
+
+  const confirmDeleteClient = async () => {
+    if (!clientDeleteTarget || isDeletingClient) {
+      return;
+    }
+
+    const clientId = clientDeleteTarget.id;
+
+    setIsDeletingClient(true);
+    setClientMessage("");
+
+    try {
+      await deleteClientApi(clientId);
+      setClients((prev) => prev.filter((client) => client.id !== clientId));
+      if (String(clientId) === String(selectedClientId)) {
+        setSelectedClientId("");
+      }
+      setClientMessage("Client deleted.");
+      setClientDeleteTarget(null);
+    } catch (err) {
+      setClientMessage("Failed to delete client: " + err.message);
+    } finally {
+      setIsDeletingClient(false);
+    }
   };
 
   const handleStockInputChange = (productId, value) => {
@@ -476,25 +502,33 @@ export default function Invoice() {
     setStockComments((prev) => ({ ...prev, [productId]: value }));
   };
 
-  const fetchStockHistory = async (productId) => {
+  const fetchStockHistory = async (productId, page = 1) => {
     try {
-      const res = await fetch(`http://127.0.0.1:5000/inventory/${productId}/history`, {
-        headers: getAuthHeaders(),
+      const data = await getInventoryHistory(productId, {
+        page,
+        pageSize: STOCK_HISTORY_PAGE_SIZE,
       });
-      const data = await res.json();
-
-      if (res.ok) {
-        setSelectedHistoryProductId(productId);
-        setStockHistoryItem(data.item);
-        setStockHistory(data.history);
-        setStockHistoryPage(1);
-        setStockMessage("");
-      } else {
-        setStockMessage(data.error || "Failed to load stock history");
-      }
+      setSelectedHistoryProductId(productId);
+      setStockHistoryItem(data.item);
+      setStockHistory(data.history);
+      setStockHistoryPage(data.pagination?.page || page);
+      setStockHistoryPageCount(data.pagination?.total_pages || 1);
+      setStockHistoryTotalCount(data.pagination?.total_count || data.history.length);
+      setStockMessage("");
     } catch (err) {
       setStockMessage("Failed to load stock history: " + err.message);
     }
+  };
+
+  const updateStockState = (productId, stockQuantity) => {
+    setStockRows((prev) =>
+      prev.map((row) => (row.product_id === productId ? { ...row, stock_quantity: stockQuantity } : row))
+    );
+    setProducts((prev) =>
+      prev.map((product) => (product.id === productId ? { ...product, stock_quantity: stockQuantity } : product))
+    );
+    setStockInputs((prev) => ({ ...prev, [productId]: "" }));
+    setStockComments((prev) => ({ ...prev, [productId]: "" }));
   };
 
   const addStock = async (productId) => {
@@ -503,36 +537,11 @@ export default function Invoice() {
     setStockMessage("");
 
     try {
-      const res = await fetch(`http://127.0.0.1:5000/inventory/${productId}/stock-in`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({ quantity, comment }),
-      });
-      const data = await res.json();
-
-      if (res.ok) {
-        setStockRows((prev) =>
-          prev.map((row) =>
-            row.product_id === productId
-              ? { ...row, stock_quantity: data.stock_quantity }
-              : row
-          )
-        );
-        setProducts((prev) =>
-          prev.map((product) =>
-            product.id === productId
-              ? { ...product, stock_quantity: data.stock_quantity }
-              : product
-          )
-        );
-        setStockInputs((prev) => ({ ...prev, [productId]: "" }));
-        setStockComments((prev) => ({ ...prev, [productId]: "" }));
-        setStockMessage("Stock updated.");
-        if (String(selectedHistoryProductId) === String(productId)) {
-          fetchStockHistory(productId);
-        }
-      } else {
-        setStockMessage(data.error || "Failed to update stock");
+      const data = await addStockApi(productId, { quantity, comment });
+      updateStockState(productId, data.stock_quantity);
+      setStockMessage("Stock updated.");
+      if (String(selectedHistoryProductId) === String(productId)) {
+        fetchStockHistory(productId, 1);
       }
     } catch (err) {
       setStockMessage("Failed to update stock: " + err.message);
@@ -545,759 +554,735 @@ export default function Invoice() {
     setStockMessage("");
 
     try {
-      const res = await fetch(`http://127.0.0.1:5000/inventory/${productId}/stock-out`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({ quantity, comment }),
-      });
-      const data = await res.json();
-
-      if (res.ok) {
-        setStockRows((prev) =>
-          prev.map((row) =>
-            row.product_id === productId
-              ? { ...row, stock_quantity: data.stock_quantity }
-              : row
-          )
-        );
-        setProducts((prev) =>
-          prev.map((product) =>
-            product.id === productId
-              ? { ...product, stock_quantity: data.stock_quantity }
-              : product
-          )
-        );
-        setStockInputs((prev) => ({ ...prev, [productId]: "" }));
-        setStockComments((prev) => ({ ...prev, [productId]: "" }));
-        setStockMessage("Stock removed.");
-        if (String(selectedHistoryProductId) === String(productId)) {
-          fetchStockHistory(productId);
-        }
-      } else {
-        setStockMessage(data.error || "Failed to remove stock");
+      const data = await removeStockApi(productId, { quantity, comment });
+      updateStockState(productId, data.stock_quantity);
+      setStockMessage("Stock removed.");
+      if (String(selectedHistoryProductId) === String(productId)) {
+        fetchStockHistory(productId, 1);
       }
     } catch (err) {
       setStockMessage("Failed to remove stock: " + err.message);
     }
   };
 
-  const calculateTotals = () => {
-    const total = formData.items.reduce((sum, item) => sum + (item.amount || 0), 0);
-    const subtotal = total / 1.1;
-    const tax = total - subtotal;
-    return { subtotal, tax, total };
+  const applyInvoiceStockChange = (items) => {
+    const changes = items.reduce((acc, item) => {
+      const productId = Number(item.product_id);
+      const quantity = Number(item.quantity) || 0;
+
+      if (!productId || quantity <= 0) {
+        return acc;
+      }
+
+      acc[productId] = (acc[productId] || 0) + quantity;
+      return acc;
+    }, {});
+
+    setProducts((prev) =>
+      prev.map((product) =>
+        changes[product.id]
+          ? { ...product, stock_quantity: Number(product.stock_quantity || 0) - changes[product.id] }
+          : product
+      )
+    );
+    setStockRows((prev) =>
+      prev.map((row) =>
+        changes[row.product_id]
+          ? { ...row, stock_quantity: Number(row.stock_quantity || 0) - changes[row.product_id] }
+          : row
+      )
+    );
   };
 
   const handleCreateInvoice = async (e) => {
     e.preventDefault();
-    
-    // Validate required fields
-    if (!formData.invoice_number || !formData.client_name || !formData.issue_date) {
-      alert("Please fill in all required fields (Invoice #, Client Name, Issue Date)");
+
+    if (isCreatingInvoice) {
       return;
     }
 
-    // Validate at least one item with product and price
-    const hasValidItem = formData.items.some(item => item.description && item.quantity > 0 && item.unit_price > 0);
+    if (!formData.invoice_number || !formData.client_name || !formData.issue_date) {
+      setInvoiceNotice({
+        title: "Missing invoice details",
+        message: "Please fill in all required fields: Invoice #, Client Name, and Issue Date.",
+      });
+      return;
+    }
+
+    const hasValidItem = formData.items.some(
+      (item) => item.description && Number(item.quantity) > 0 && Number(item.unit_price) > 0
+    );
     if (!hasValidItem) {
-      alert("Please add at least one item with product, pkg, and unit price /pkg");
+      setInvoiceNotice({
+        title: "Missing invoice item",
+        message: "Please add at least one item with product, quantity, and unit price.",
+      });
       return;
     }
 
     const { subtotal, tax, total } = calculateTotals();
-
-    const invoiceData = {
-      user_id,
-      invoice_number: formData.invoice_number,
-      client_name: formData.client_name,
-      issue_date: formData.issue_date,
-      due_date: formData.due_date,
-      items: formData.items,
-      subtotal,
-      tax,
-      total,
-    };
+    setIsCreatingInvoice(true);
 
     try {
-      const res = await fetch("http://127.0.0.1:5000/invoices", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify(invoiceData),
+      await createInvoiceApi({
+        user_id: userId,
+        invoice_number: formData.invoice_number,
+        client_name: formData.client_name,
+        issue_date: formData.issue_date,
+        due_date: formData.due_date,
+        items: formData.items,
+        subtotal,
+        tax,
+        total,
       });
 
-      const data = await res.json();
-
-      if (res.ok) {
-        alert("Invoice created successfully!");
-        setShowCreateForm(false);
-        setFormData(createInitialFormData([...invoices, invoiceData]));
-        fetchInvoices(user_id);
-        fetchProducts();
-        if (accountType === "Admin") {
-          fetchStock();
-        }
-      } else {
-        alert(`Error: ${data.error || "Failed to create invoice"}`);
-        console.error("Server error:", data);
-      }
+      const refreshedInvoices = await loadInvoices(userId);
+      setFormData(createInitialFormData(refreshedInvoices));
+      applyInvoiceStockChange(formData.items);
+      setActiveView("menu");
+      setInvoiceNotice({
+        title: "Invoice created",
+        message: "The invoice has been created successfully.",
+      });
     } catch (err) {
-      console.error("Error creating invoice:", err);
-      alert("Failed to create invoice: " + err.message);
+      setInvoiceNotice({
+        title: "Invoice creation failed",
+        message: `Failed to create invoice: ${err.message}`,
+      });
+    } finally {
+      setIsCreatingInvoice(false);
     }
   };
 
   const downloadPDF = async (invoiceId, invoiceNumber) => {
     try {
-      const res = await fetch(`http://127.0.0.1:5000/invoices/${invoiceId}/pdf`, {
-        headers: getAuthHeaders(),
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        alert(`Error: ${data.error || "Failed to download PDF"}`);
-        return;
-      }
-
-      const blob = await res.blob();
+      const blob = await downloadInvoicePdf(invoiceId);
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `invoice_${invoiceNumber}.pdf`;
+      link.download = `${invoiceNumber}.pdf`;
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
     } catch (err) {
-      alert("Failed to download PDF: " + err.message);
+      setInvoiceNotice({
+        title: "Download failed",
+        message: `Failed to download invoice: ${err.message}`,
+      });
     }
   };
 
-  const deleteInvoice = async (invoiceId, invoiceNumber) => {
-    const confirmed = window.confirm(`Delete invoice ${invoiceNumber}? This cannot be undone.`);
+  const requestDeleteInvoice = (invoice) => {
+    setInvoiceDeleteTarget(invoice);
+  };
 
-    if (!confirmed) {
+  const confirmDeleteInvoice = async () => {
+    if (!invoiceDeleteTarget || isDeletingInvoice) {
       return;
     }
+
+    const invoiceId = invoiceDeleteTarget.id;
+
+    setIsDeletingInvoice(true);
 
     try {
-      const res = await fetch(`http://127.0.0.1:5000/invoices/${invoiceId}`, {
-        method: "DELETE",
-        headers: getAuthHeaders(),
+      await deleteInvoiceApi(invoiceId);
+      setInvoices((prev) => prev.filter((invoice) => invoice.id !== invoiceId));
+      setInvoiceDeleteTarget(null);
+      setInvoiceNotice({
+        title: "Invoice deleted",
+        message: "The invoice has been deleted and stock has been returned.",
       });
-      const data = await res.json();
-
-      if (res.ok) {
-        setInvoices((prev) => prev.filter((invoice) => invoice.id !== invoiceId));
-        fetchProducts();
-        if (accountType === "Admin") {
-          fetchStock();
+      loadProducts();
+      if (isAdmin) {
+        loadStock();
+        if (selectedHistoryProductId) {
+          fetchStockHistory(selectedHistoryProductId, 1);
         }
-      } else {
-        alert(`Error: ${data.error || "Failed to delete invoice"}`);
       }
     } catch (err) {
-      alert("Failed to delete invoice: " + err.message);
+      setInvoiceNotice({
+        title: "Delete failed",
+        message: `Failed to delete invoice: ${err.message}`,
+      });
+    } finally {
+      setIsDeletingInvoice(false);
     }
   };
 
-  const toggleCreateInvoice = () => {
-    const shouldOpen = !showCreateForm;
+  const closeInvoiceNotice = () => {
+    const redirectTo = invoiceNotice?.redirectTo;
 
-    if (shouldOpen) {
-      setFormData(createInitialFormData(invoices));
+    setInvoiceNotice(null);
+
+    if (redirectTo) {
+      window.location.href = redirectTo;
     }
-
-    setShowCreateForm(shouldOpen);
-    setShowEditItems(false);
-    setShowClients(false);
-    setShowStock(false);
   };
 
-  const toggleEditItems = () => {
-    if (accountType !== "Admin") {
+  const openInvoiceView = (view) => {
+    if (view === "stock" && !isAdmin) {
       return;
     }
 
-    const shouldOpen = !showEditItems;
+    setActiveView(view);
 
-    setShowEditItems(shouldOpen);
-    setShowCreateForm(false);
-    setShowClients(false);
-    setShowStock(false);
+    if (view === "stock") {
+      loadStock();
+    }
   };
 
-  const toggleClients = () => {
-    if (accountType !== "Admin") {
-      return;
-    }
-
-    const shouldOpen = !showClients;
-
-    setShowClients(shouldOpen);
-    setShowCreateForm(false);
-    setShowEditItems(false);
-    setShowStock(false);
-  };
-
-  const toggleStock = () => {
-    if (accountType !== "Admin") {
-      return;
-    }
-
-    const shouldOpen = !showStock;
-
-    setShowStock(shouldOpen);
-    setShowCreateForm(false);
-    setShowEditItems(false);
-    setShowClients(false);
-
-    if (shouldOpen) {
-      fetchStock();
-    }
+  const returnToMenu = () => {
+    setActiveView("menu");
   };
 
   const { subtotal, tax, total } = calculateTotals();
-  const isAdmin = accountType === "Admin";
-  const stockHistoryPageCount = Math.max(1, Math.ceil(stockHistory.length / STOCK_HISTORY_PAGE_SIZE));
-  const visibleStockHistory = stockHistory.slice(
-    (stockHistoryPage - 1) * STOCK_HISTORY_PAGE_SIZE,
-    stockHistoryPage * STOCK_HISTORY_PAGE_SIZE
-  );
-  const stockGridColumns = "minmax(270px, 1.8fr) 96px 88px minmax(220px, 1.4fr) 78px 92px 92px";
-  const productEditGridColumns = "1.4fr 2fr 1fr 64px 70px";
-  const stockInputStyle = {
-    width: "100%",
-    height: "38px",
-    boxSizing: "border-box",
-    padding: "0 12px",
-    border: "1px solid #cbd5e1",
-    borderRadius: "6px",
-    fontSize: "0.9rem",
+  const openDateFilter = (field, value) => {
+    setOpenInvoiceDatePicker(field);
+    setInvoiceCalendarMonth(parseDateString(value) || new Date());
   };
-  const stockButtonStyle = {
-    width: "100%",
-    height: "38px",
-    border: "none",
-    borderRadius: "6px",
-    color: "white",
-    fontSize: "0.84rem",
-    fontWeight: 700,
-    cursor: "pointer",
+  const moveInvoiceCalendarMonth = (offset) => {
+    setInvoiceCalendarMonth((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1));
   };
+  const updateInvoiceCalendarMonth = (month) => {
+    setInvoiceCalendarMonth((current) => new Date(current.getFullYear(), Number(month), 1));
+  };
+  const updateInvoiceCalendarYear = (year) => {
+    setInvoiceCalendarMonth((current) => new Date(Number(year), current.getMonth(), 1));
+  };
+  const selectInvoiceFilterDate = (field, date) => {
+    const value = formatDateInput(date);
 
-  return (
-    <div style={{ maxWidth: "1180px", margin: "50px auto", padding: "20px" }}>
-      <h2>Invoices</h2>
+    if (field === "from") {
+      setInvoiceDateFrom(value);
+    } else {
+      setInvoiceDateTo(value);
+    }
 
-      <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
-        <button
-          onClick={toggleCreateInvoice}
-          style={{
-            padding: "10px 20px",
-            background: "#1e40af",
-            color: "white",
-            border: "none",
-            borderRadius: "5px",
-            cursor: "pointer",
-          }}
-        >
-          {showCreateForm ? "Cancel" : "Create Invoice"}
-        </button>
-        {isAdmin && (
-          <>
-            <button
-              onClick={toggleEditItems}
-              style={{
-                padding: "10px 20px",
-                background: "#475569",
-                color: "white",
-                border: "none",
-                borderRadius: "5px",
-                cursor: "pointer",
-              }}
-            >
-              {showEditItems ? "Close Items" : "Edit Item"}
-            </button>
-            <button
-              onClick={toggleClients}
-              style={{
-                padding: "10px 20px",
-                background: "#64748b",
-                color: "white",
-                border: "none",
-                borderRadius: "5px",
-                cursor: "pointer",
-              }}
-            >
-              {showClients ? "Close Clients" : "Client"}
-            </button>
-            <button
-              onClick={toggleStock}
-              style={{
-                padding: "10px 20px",
-                background: "#0f766e",
-                color: "white",
-                border: "none",
-                borderRadius: "5px",
-                cursor: "pointer",
-              }}
-            >
-              {showStock ? "Close Stock" : "Stock Check"}
-            </button>
-          </>
-        )}
-      </div>
+    setOpenInvoiceDatePicker(null);
+  };
+  const renderInvoiceDatePicker = (field, selectedValue) => {
+    if (openInvoiceDatePicker !== field) {
+      return null;
+    }
 
-      {isAdmin && showStock && (
-      <section style={{ border: "1px solid #d7dbe2", padding: "20px", borderRadius: "8px", marginBottom: "30px", background: "#ffffff" }}>
-        <h3 style={{ margin: "0 0 16px", fontSize: "1.25rem" }}>Stock Check</h3>
-        {stockMessage && <p style={{ marginBottom: "12px", color: "#475569" }}>{stockMessage}</p>}
+    const year = invoiceCalendarMonth.getFullYear();
+    const month = invoiceCalendarMonth.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const selectedDate = parseDateString(selectedValue);
+    const yearOptions = Array.from(
+      { length: YEAR_RANGE * 2 + 1 },
+      (_, index) => year - YEAR_RANGE + index
+    );
+    const days = [
+      ...Array.from({ length: firstDay.getDay() }, (_, index) => ({ key: `empty-${index}`, day: null })),
+      ...Array.from({ length: daysInMonth }, (_, index) => ({
+        key: `day-${index + 1}`,
+        day: new Date(year, month, index + 1),
+      })),
+    ];
 
-        {stockRows.length === 0 ? (
-          <p>No products yet. Create items first.</p>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-          <div style={{ display: "grid", gap: "0", minWidth: "1038px" }}>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: stockGridColumns,
-                columnGap: "12px",
-                alignItems: "center",
-                padding: "0 0 10px",
-                borderBottom: "1px solid #e2e8f0",
-                color: "#0f172a",
-                fontSize: "0.9rem",
-                fontWeight: 700,
-              }}
-            >
-              <span>Item</span>
-              <span style={{ textAlign: "right" }}>Stock</span>
-              <span>Qty</span>
-              <span>Comment</span>
-              <span style={{ textAlign: "center" }}>History</span>
-              <span style={{ textAlign: "center" }}>In</span>
-              <span style={{ textAlign: "center" }}>Out</span>
-            </div>
-            {stockRows.map((row) => (
-              <div
-                key={row.product_id}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: stockGridColumns,
-                  columnGap: "12px",
-                  alignItems: "center",
-                  minHeight: "56px",
-                  padding: "8px 0",
-                  borderBottom: "1px solid #eef2f7",
-                }}
-              >
-                <span style={{ lineHeight: 1.25 }}>{row.item}</span>
-                <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                  {Number(row.stock_quantity || 0).toFixed(2)}
-                </span>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  placeholder="Qty"
-                  value={stockInputs[row.product_id] || ""}
-                  onChange={(e) => handleStockInputChange(row.product_id, e.target.value)}
-                  style={stockInputStyle}
-                />
-                <input
-                  placeholder="Comment"
-                  value={stockComments[row.product_id] || ""}
-                  onChange={(e) => handleStockCommentChange(row.product_id, e.target.value)}
-                  style={stockInputStyle}
-                />
-                <button
-                  type="button"
-                  onClick={() => fetchStockHistory(row.product_id)}
-                  style={{
-                    ...stockButtonStyle,
-                    background: "#475569",
-                  }}
-                >
-                  View
-                </button>
-                <button
-                  type="button"
-                  onClick={() => addStock(row.product_id)}
-                  style={{
-                    ...stockButtonStyle,
-                    background: "#0f766e",
-                  }}
-                >
-                  Stock In
-                </button>
-                <button
-                  type="button"
-                  onClick={() => removeStock(row.product_id)}
-                  style={{
-                    ...stockButtonStyle,
-                    background: "#b42318",
-                  }}
-                >
-                  Stock Out
-                </button>
-              </div>
-            ))}
-          </div>
-          </div>
-        )}
-
-        {selectedHistoryProductId && (
-          <div style={{ marginTop: "24px", borderTop: "1px solid #e2e8f0", paddingTop: "18px" }}>
-            <h4 style={{ margin: "0 0 12px" }}>Stock history: {stockHistoryItem}</h4>
-            {stockHistory.length === 0 ? (
-              <p>No stock history yet.</p>
-            ) : (
-              <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", border: "1px solid #ccc" }}>
-                <colgroup>
-                  <col style={{ width: "20%" }} />
-                  <col style={{ width: "13%" }} />
-                  <col style={{ width: "9%" }} />
-                  <col style={{ width: "10%" }} />
-                  <col style={{ width: "28%" }} />
-                  <col style={{ width: "20%" }} />
-                </colgroup>
-                <thead>
-                  <tr style={{ background: "#0f766e", color: "white" }}>
-                    <th style={{ padding: "10px", textAlign: "left" }}>Time</th>
-                    <th style={{ padding: "10px", textAlign: "left" }}>Action</th>
-                    <th style={{ padding: "10px", textAlign: "right" }}>Change</th>
-                    <th style={{ padding: "10px", textAlign: "right" }}>Stock after</th>
-                    <th style={{ padding: "10px", textAlign: "left" }}>Comment</th>
-                    <th style={{ padding: "10px", textAlign: "left" }}>By</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleStockHistory.map((entry) => (
-                    <tr key={entry.id} style={{ borderBottom: "1px solid #ccc" }}>
-                      <td style={{ padding: "10px", wordBreak: "break-word" }}>{entry.created_at}</td>
-                      <td style={{ padding: "10px", wordBreak: "break-word" }}>{entry.action_type}</td>
-                      <td style={{ padding: "10px", textAlign: "right" }}>
-                        {Number(entry.change_quantity || 0).toFixed(2)}
-                      </td>
-                      <td style={{ padding: "10px", textAlign: "right" }}>
-                        {Number(entry.stock_after || 0).toFixed(2)}
-                      </td>
-                      <td style={{ padding: "10px", wordBreak: "break-word" }}>{entry.comment || "-"}</td>
-                      <td style={{ padding: "10px", wordBreak: "break-word" }}>{entry.created_by || "-"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-            {stockHistory.length > STOCK_HISTORY_PAGE_SIZE && (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "flex-end",
-                  gap: "10px",
-                  marginTop: "12px",
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => setStockHistoryPage((page) => Math.max(1, page - 1))}
-                  disabled={stockHistoryPage === 1}
-                  style={{
-                    padding: "8px 12px",
-                    border: "1px solid #cbd5e1",
-                    borderRadius: "6px",
-                    background: stockHistoryPage === 1 ? "#f1f5f9" : "#ffffff",
-                    color: stockHistoryPage === 1 ? "#94a3b8" : "#334155",
-                    cursor: stockHistoryPage === 1 ? "not-allowed" : "pointer",
-                  }}
-                >
-                  Previous
-                </button>
-                <span style={{ color: "#475569", fontSize: "0.9rem" }}>
-                  Page {stockHistoryPage} of {stockHistoryPageCount}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setStockHistoryPage((page) => Math.min(stockHistoryPageCount, page + 1))}
-                  disabled={stockHistoryPage === stockHistoryPageCount}
-                  style={{
-                    padding: "8px 12px",
-                    border: "1px solid #cbd5e1",
-                    borderRadius: "6px",
-                    background: stockHistoryPage === stockHistoryPageCount ? "#f1f5f9" : "#ffffff",
-                    color: stockHistoryPage === stockHistoryPageCount ? "#94a3b8" : "#334155",
-                    cursor: stockHistoryPage === stockHistoryPageCount ? "not-allowed" : "pointer",
-                  }}
-                >
-                  Next
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-      </section>
-      )}
-
-      {isAdmin && showClients && (
-      <section style={{ border: "1px solid #ccc", padding: "20px", borderRadius: "5px", marginBottom: "30px" }}>
-        <h3>Client</h3>
-        <form
-          onSubmit={createClient}
-          style={{ display: "grid", gridTemplateColumns: "2fr auto", gap: "10px", marginBottom: "18px" }}
-        >
-          <input
-            name="client_name"
-            placeholder="Client Name"
-            value={newClient.client_name}
-            onChange={handleNewClientChange}
-            required
-            style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px" }}
-          />
-          <button
-            type="submit"
-            style={{
-              padding: "10px 16px",
-              background: "#1e40af",
-              color: "white",
-              border: "none",
-              borderRadius: "5px",
-              cursor: "pointer",
-            }}
-          >
-            Add
-          </button>
-        </form>
-
-        {clientMessage && <p style={{ marginBottom: "12px", color: "#475569" }}>{clientMessage}</p>}
-
-        {clients.length === 0 ? (
-          <p>No clients yet. Create one above to use it in invoices.</p>
-        ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 2fr auto auto", gap: "10px", alignItems: "center" }}>
+    return (
+      <div className="invoice-date-picker">
+        <div className="invoice-date-picker__header">
+          <div className="invoice-date-picker__selectors">
             <select
-              value={selectedClientId}
-              onChange={(e) => setSelectedClientId(e.target.value)}
-              style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: "white" }}
+              value={month}
+              onChange={(e) => updateInvoiceCalendarMonth(e.target.value)}
+              className="form-control invoice-date-picker__select"
+              aria-label="Month"
             >
-              <option value="">Select client to edit</option>
-              {clients.map((client) => (
-                <option key={client.id} value={client.id}>
-                  {client.client_name}
+              {MONTH_NAMES.map((monthName, index) => (
+                <option key={monthName} value={index}>
+                  {monthName}
                 </option>
               ))}
             </select>
-            <input
-              placeholder="Client Name"
-              value={selectedClient?.client_name ?? ""}
-              disabled={!selectedClient}
-              onChange={(e) => handleClientChange(selectedClient.id, e.target.value)}
-              style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: selectedClient ? "white" : "#f0f0f0" }}
-            />
-            <button
-              type="button"
-              disabled={!selectedClient}
-              onClick={() => updateClient(selectedClient)}
-              style={{
-                padding: "10px 16px",
-                background: selectedClient ? "#10b981" : "#94a3b8",
-                color: "white",
-                border: "none",
-                borderRadius: "5px",
-                cursor: selectedClient ? "pointer" : "not-allowed",
-              }}
+            <select
+              value={year}
+              onChange={(e) => updateInvoiceCalendarYear(e.target.value)}
+              className="form-control invoice-date-picker__select"
+              aria-label="Year"
             >
-              Save
-            </button>
-            <button
-              type="button"
-              disabled={!selectedClient}
-              onClick={() => deleteClient(selectedClient.id, selectedClient.client_name)}
-              style={{
-                padding: "10px 16px",
-                background: selectedClient ? "#dc2626" : "#94a3b8",
-                color: "white",
-                border: "none",
-                borderRadius: "5px",
-                cursor: selectedClient ? "pointer" : "not-allowed",
-              }}
-            >
-              Delete
-            </button>
+              {yearOptions.map((yearOption) => (
+                <option key={yearOption} value={yearOption}>
+                  {yearOption}
+                </option>
+              ))}
+            </select>
           </div>
-        )}
-      </section>
+          <div className="invoice-date-picker__nav">
+            <ActionButton type="button" variant="light" size="sm" onClick={() => moveInvoiceCalendarMonth(-1)}>
+              Previous
+            </ActionButton>
+            <ActionButton type="button" variant="light" size="sm" onClick={() => moveInvoiceCalendarMonth(1)}>
+              Next
+            </ActionButton>
+          </div>
+        </div>
+        <div className="invoice-date-picker__grid invoice-date-picker__weekdays">
+          {WEEKDAY_NAMES.map((dayName) => (
+            <span key={dayName}>{dayName}</span>
+          ))}
+        </div>
+        <div className="invoice-date-picker__grid">
+          {days.map(({ key, day }) => {
+            const isSelected =
+              day &&
+              selectedDate &&
+              day.getFullYear() === selectedDate.getFullYear() &&
+              day.getMonth() === selectedDate.getMonth() &&
+              day.getDate() === selectedDate.getDate();
+            const today = new Date();
+            const isToday =
+              day &&
+              day.getFullYear() === today.getFullYear() &&
+              day.getMonth() === today.getMonth() &&
+              day.getDate() === today.getDate();
+
+            return day ? (
+              <button
+                key={key}
+                type="button"
+                className={`invoice-date-picker__day${isToday ? " invoice-date-picker__day--today" : ""}${isSelected ? " invoice-date-picker__day--selected" : ""}`}
+                onClick={() => selectInvoiceFilterDate(field, day)}
+              >
+                {day.getDate()}
+              </button>
+            ) : (
+              <span key={key} className="invoice-date-picker__empty"></span>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+  const invoiceClientOptions = [...new Set(invoices.map((invoice) => invoice.client_name).filter(Boolean))].sort();
+  const filteredInvoices = invoices.filter((invoice) => {
+    const searchValue = invoiceSearch.trim().toLowerCase();
+    const matchesSearch = searchValue
+      ? [invoice.invoice_number, invoice.client_name, invoice.issue_date]
+          .some((value) => String(value || "").toLowerCase().includes(searchValue))
+      : true;
+    const matchesClient = invoiceClientFilter ? invoice.client_name === invoiceClientFilter : true;
+    const matchesFrom = invoiceDateFrom ? invoice.issue_date >= invoiceDateFrom : true;
+    const matchesTo = invoiceDateTo ? invoice.issue_date <= invoiceDateTo : true;
+
+    return matchesSearch && matchesClient && matchesFrom && matchesTo;
+  });
+  const invoicePageCount = Math.max(1, Math.ceil(filteredInvoices.length / INVOICE_PAGE_SIZE));
+  const visibleInvoices = filteredInvoices.slice(
+    (invoicePage - 1) * INVOICE_PAGE_SIZE,
+    invoicePage * INVOICE_PAGE_SIZE
+  );
+
+  return (
+    <PageShell
+      title="Invoices"
+      size="wide"
+      actions={(
+        <PageToolbar>
+          {activeView === "menu" ? (
+            <>
+              <ActionButton onClick={() => openInvoiceView("create")}>
+                Create Invoice
+              </ActionButton>
+              {isAdmin && (
+                <>
+                  <ActionButton variant="secondary" onClick={() => openInvoiceView("items")}>
+                    Edit Item
+                  </ActionButton>
+                  <ActionButton variant="muted" onClick={() => openInvoiceView("clients")}>
+                    Client
+                  </ActionButton>
+                  <ActionButton variant="success" onClick={() => openInvoiceView("stock")}>
+                    Stock Check
+                  </ActionButton>
+                </>
+              )}
+            </>
+          ) : (
+            <ActionButton variant="secondary" onClick={returnToMenu}>
+              Back to menu
+            </ActionButton>
+          )}
+        </PageToolbar>
+      )}
+    >
+      {invoiceNotice && (
+        <div className="invoice-notice" role="dialog" aria-modal="true" aria-labelledby="invoice-notice-title">
+          <div className="invoice-notice__card">
+            <h3 id="invoice-notice-title">{invoiceNotice.title}</h3>
+            <p>{invoiceNotice.message}</p>
+            <div className="invoice-notice__actions">
+              <ActionButton type="button" onClick={closeInvoiceNotice}>
+                Close
+              </ActionButton>
+            </div>
+          </div>
+        </div>
       )}
 
-      {isAdmin && showEditItems && (
-      <section style={{ border: "1px solid #ccc", padding: "20px", borderRadius: "5px", marginBottom: "30px" }}>
-        <h3>Create Item</h3>
-        <form
-          onSubmit={createProduct}
-          style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1.5fr auto", gap: "10px", marginBottom: "18px" }}
-        >
-          <input
-            name="item"
-            placeholder="Item"
-            value={newProduct.item}
-            onChange={handleNewProductChange}
-            required
-            style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px" }}
-          />
-          <input
-            type="number"
-            step="0.01"
-            name="unit_price"
-            placeholder="Unit Price /pkg"
-            value={newProduct.unit_price}
-            onChange={handleNewProductChange}
-            required
-            style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px" }}
-          />
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            name="stock_quantity"
-            placeholder="Initial Stock"
-            value={newProduct.stock_quantity}
-            onChange={handleNewProductChange}
-            style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px" }}
-          />
-          <input
-            name="stock_comment"
-            placeholder="Stock comment"
-            value={newProduct.stock_comment}
-            onChange={handleNewProductChange}
-            style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px" }}
-          />
-          <button
-            type="submit"
-            style={{
-              padding: "10px 16px",
-              background: "#1e40af",
-              color: "white",
-              border: "none",
-              borderRadius: "5px",
-              cursor: "pointer",
-            }}
-          >
-            Add
-          </button>
-        </form>
-
-        {productMessage && <p style={{ marginBottom: "12px", color: "#475569" }}>{productMessage}</p>}
-
-        {products.length === 0 ? (
-          <p>No products yet. Create one above to use it in invoices.</p>
-        ) : (
-          <div>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: productEditGridColumns,
-                gap: "10px",
-                marginBottom: "6px",
-                color: "#334155",
-                fontSize: "0.85rem",
-                fontWeight: 700,
-              }}
-            >
-              <span></span>
-              <span style={{ justifySelf: "start" }}>Item name</span>
-              <span style={{ justifySelf: "start" }}>Unit price</span>
-              <span></span>
-              <span></span>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: productEditGridColumns, gap: "10px", alignItems: "center" }}>
-              <select
-                value={selectedProductId}
-                onChange={(e) => setSelectedProductId(e.target.value)}
-                style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: "white" }}
+      {invoiceDeleteTarget && (
+        <div className="invoice-notice" role="dialog" aria-modal="true" aria-labelledby="invoice-delete-title">
+          <div className="invoice-notice__card">
+            <h3 id="invoice-delete-title">Delete invoice</h3>
+            <p>
+              Delete invoice {invoiceDeleteTarget.invoice_number}? Stock will be returned for invoice items.
+            </p>
+            <div className="invoice-notice__actions">
+              <ActionButton
+                type="button"
+                variant="light"
+                onClick={() => setInvoiceDeleteTarget(null)}
+                disabled={isDeletingInvoice}
               >
-                <option value="">Select item to edit</option>
-                {products.map((product) => (
-                  <option key={product.id} value={product.id}>
-                    {product.item}
+                Cancel
+              </ActionButton>
+              <ActionButton
+                type="button"
+                variant="danger"
+                onClick={confirmDeleteInvoice}
+                disabled={isDeletingInvoice}
+              >
+                {isDeletingInvoice ? "Deleting..." : "Delete invoice"}
+              </ActionButton>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {clientDeleteTarget && (
+        <div className="invoice-notice" role="dialog" aria-modal="true" aria-labelledby="client-delete-title">
+          <div className="invoice-notice__card">
+            <h3 id="client-delete-title">Delete client</h3>
+            <p>
+              Delete client {clientDeleteTarget.client_name}? Existing invoices will not be changed.
+            </p>
+            <div className="invoice-notice__actions">
+              <ActionButton
+                type="button"
+                variant="light"
+                onClick={() => setClientDeleteTarget(null)}
+                disabled={isDeletingClient}
+              >
+                Cancel
+              </ActionButton>
+              <ActionButton
+                type="button"
+                variant="danger"
+                onClick={confirmDeleteClient}
+                disabled={isDeletingClient}
+              >
+                {isDeletingClient ? "Deleting..." : "Delete client"}
+              </ActionButton>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {productDeleteTarget && (
+        <div className="invoice-notice" role="dialog" aria-modal="true" aria-labelledby="product-delete-title">
+          <div className="invoice-notice__card">
+            <h3 id="product-delete-title">Delete item</h3>
+            <p>
+              Delete item {productDeleteTarget.item}? Existing invoices will not be changed.
+            </p>
+            <div className="invoice-notice__actions">
+              <ActionButton
+                type="button"
+                variant="light"
+                onClick={() => setProductDeleteTarget(null)}
+                disabled={isDeletingProduct}
+              >
+                Cancel
+              </ActionButton>
+              <ActionButton
+                type="button"
+                variant="danger"
+                onClick={confirmDeleteProduct}
+                disabled={isDeletingProduct}
+              >
+                {isDeletingProduct ? "Deleting..." : "Delete item"}
+              </ActionButton>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isAdmin && activeView === "stock" && (
+        <PagePanel title="Stock Check">
+          {stockMessage && <p className="status-message">{stockMessage}</p>}
+
+          {stockRows.length === 0 ? (
+            <p>No products yet. Create items first.</p>
+          ) : (
+            <div className="stock-grid-scroll">
+              <div className="stock-grid">
+                <div className="stock-grid__row stock-grid__header">
+                  <span>Item</span>
+                  <span className="stock-grid__number">Stock</span>
+                  <span>Qty</span>
+                  <span>Comment</span>
+                  <span className="stock-grid__center">History</span>
+                  <span className="stock-grid__center">In</span>
+                  <span className="stock-grid__center">Out</span>
+                </div>
+                {stockRows.map((row) => (
+                  <div key={row.product_id} className="stock-grid__row stock-grid__item">
+                    <span>{row.item}</span>
+                    <span className="stock-grid__number">{Number(row.stock_quantity || 0).toFixed(2)}</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="Qty"
+                      value={stockInputs[row.product_id] || ""}
+                      onChange={(e) => handleStockInputChange(row.product_id, e.target.value)}
+                      className="form-control"
+                    />
+                    <input
+                      placeholder="Comment"
+                      value={stockComments[row.product_id] || ""}
+                      onChange={(e) => handleStockCommentChange(row.product_id, e.target.value)}
+                      className="form-control"
+                    />
+                    <ActionButton type="button" variant="secondary" size="sm" onClick={() => fetchStockHistory(row.product_id)}>
+                      View
+                    </ActionButton>
+                    <ActionButton type="button" variant="success" size="sm" onClick={() => addStock(row.product_id)}>
+                      Stock In
+                    </ActionButton>
+                    <ActionButton type="button" variant="danger" size="sm" onClick={() => removeStock(row.product_id)}>
+                      Stock Out
+                    </ActionButton>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {selectedHistoryProductId && (
+            <div className="history-block">
+              <h4 className="history-block__title">Stock history: {stockHistoryItem}</h4>
+              {stockHistory.length === 0 ? (
+                <p>No stock history yet.</p>
+              ) : (
+                <table className="data-table data-table--fixed">
+                  <colgroup>
+                    <col className="stock-history-col--time" />
+                    <col className="stock-history-col--action" />
+                    <col className="stock-history-col--change" />
+                    <col className="stock-history-col--stock" />
+                    <col className="stock-history-col--comment" />
+                    <col className="stock-history-col--by" />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Action</th>
+                      <th className="data-table__number">Change</th>
+                      <th className="data-table__number">Stock after</th>
+                      <th>Comment</th>
+                      <th>By</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stockHistory.map((entry) => (
+                      <tr key={entry.id}>
+                        <td>{entry.created_at}</td>
+                        <td>{entry.action_type}</td>
+                        <td className="data-table__number">{Number(entry.change_quantity || 0).toFixed(2)}</td>
+                        <td className="data-table__number">{Number(entry.stock_after || 0).toFixed(2)}</td>
+                        <td>{entry.comment || "-"}</td>
+                        <td>{entry.created_by || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {stockHistoryTotalCount > STOCK_HISTORY_PAGE_SIZE && (
+                <div className="pagination">
+                  <ActionButton
+                    type="button"
+                    variant={stockHistoryPage === 1 ? "ghost" : "light"}
+                    size="sm"
+                    onClick={() => fetchStockHistory(selectedHistoryProductId, Math.max(1, stockHistoryPage - 1))}
+                    disabled={stockHistoryPage === 1}
+                  >
+                    Previous
+                  </ActionButton>
+                  <span className="pagination__label">Page {stockHistoryPage} of {stockHistoryPageCount}</span>
+                  <ActionButton
+                    type="button"
+                    variant={stockHistoryPage === stockHistoryPageCount ? "ghost" : "light"}
+                    size="sm"
+                    onClick={() => fetchStockHistory(selectedHistoryProductId, Math.min(stockHistoryPageCount, stockHistoryPage + 1))}
+                    disabled={stockHistoryPage === stockHistoryPageCount}
+                  >
+                    Next
+                  </ActionButton>
+                </div>
+              )}
+            </div>
+          )}
+        </PagePanel>
+      )}
+
+      {isAdmin && activeView === "clients" && (
+        <PagePanel title="Client">
+          <form onSubmit={createClient} className="form-grid client-create-grid">
+            <input
+              name="client_name"
+              placeholder="Client Name"
+              value={newClient.client_name}
+              onChange={handleNewClientChange}
+              required
+              className="form-control"
+            />
+            <ActionButton type="submit">Add</ActionButton>
+          </form>
+
+          {clientMessage && <p className="status-message">{clientMessage}</p>}
+
+          {clients.length === 0 ? (
+            <p>No clients yet. Create one above to use it in invoices.</p>
+          ) : (
+            <div className="client-edit-grid">
+              <select value={selectedClientId} onChange={(e) => setSelectedClientId(e.target.value)} className="form-control">
+                <option value="">Select client to edit</option>
+                {clients.map((client) => (
+                  <option key={client.id} value={client.id}>
+                    {client.client_name}
                   </option>
                 ))}
               </select>
               <input
-                placeholder="Item name"
-                value={selectedProduct?.item ?? ""}
-                disabled={!selectedProduct}
-                onChange={(e) => handleProductChange(selectedProduct.id, "item", e.target.value)}
-                style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: selectedProduct ? "white" : "#f0f0f0" }}
+                placeholder="Client Name"
+                value={selectedClient?.client_name ?? ""}
+                disabled={!selectedClient}
+                onChange={(e) => handleClientChange(selectedClient.id, e.target.value)}
+                className="form-control"
               />
-              <input
-                type="number"
-                step="0.01"
-                placeholder="Unit Price /pkg"
-                value={selectedProduct?.unit_price ?? ""}
-                disabled={!selectedProduct}
-                onChange={(e) => handleProductChange(selectedProduct.id, "unit_price", e.target.value)}
-                style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: selectedProduct ? "white" : "#f0f0f0" }}
-              />
-              <button
-                type="button"
-                disabled={!selectedProduct}
-                onClick={() => updateProduct(selectedProduct)}
-                style={{
-                  padding: "10px 16px",
-                  width: "100%",
-                  background: selectedProduct ? "#10b981" : "#94a3b8",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "5px",
-                  cursor: selectedProduct ? "pointer" : "not-allowed",
-                }}
-              >
+              <ActionButton type="button" disabled={!selectedClient} variant="confirm" onClick={() => updateClient(selectedClient)}>
                 Save
-              </button>
-              <button
+              </ActionButton>
+              <ActionButton
                 type="button"
-                disabled={!selectedProduct}
-                onClick={() => deleteProduct(selectedProduct.id, selectedProduct.item)}
-                style={{
-                  padding: "10px 16px",
-                  width: "100%",
-                  background: selectedProduct ? "#dc2626" : "#94a3b8",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "5px",
-                  cursor: selectedProduct ? "pointer" : "not-allowed",
-                }}
+                disabled={!selectedClient}
+                variant="danger"
+                onClick={() => requestDeleteClient(selectedClient)}
               >
                 Delete
-              </button>
+              </ActionButton>
             </div>
-            <p style={{ margin: "10px 0 0", color: "#64748b", fontSize: "0.9rem" }}>
-              Last updated: {formatUpdatedAt(selectedProduct?.updated_at)}
-            </p>
-          </div>
-        )}
-      </section>
+          )}
+        </PagePanel>
       )}
 
-      {showCreateForm && (
-        <div style={{ border: "1px solid #ccc", padding: "20px", borderRadius: "5px", marginBottom: "30px" }}>
-          <h3>Create New Invoice</h3>
+      {isAdmin && activeView === "items" && (
+        <PagePanel title="Create Item">
+          <form onSubmit={createProduct} className="form-grid product-create-grid">
+            <input name="item" placeholder="Item" value={newProduct.item} onChange={handleNewProductChange} required className="form-control" />
+            <input
+              type="number"
+              step="0.01"
+              name="unit_price"
+              placeholder="Unit Price /pkg"
+              value={newProduct.unit_price}
+              onChange={handleNewProductChange}
+              required
+              className="form-control"
+            />
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              name="stock_quantity"
+              placeholder="Initial Stock"
+              value={newProduct.stock_quantity}
+              onChange={handleNewProductChange}
+              className="form-control"
+            />
+            <input
+              name="stock_comment"
+              placeholder="Stock comment"
+              value={newProduct.stock_comment}
+              onChange={handleNewProductChange}
+              className="form-control"
+            />
+            <ActionButton type="submit">Add</ActionButton>
+          </form>
+
+          {productMessage && <p className="status-message">{productMessage}</p>}
+
+          {products.length === 0 ? (
+            <p>No products yet. Create one above to use it in invoices.</p>
+          ) : (
+            <div>
+              <div className="product-edit-grid field-label-grid">
+                <span></span>
+                <span>Item name</span>
+                <span>Unit price</span>
+                <span></span>
+                <span></span>
+              </div>
+              <div className="product-edit-grid">
+                <select value={selectedProductId} onChange={(e) => setSelectedProductId(e.target.value)} className="form-control">
+                  <option value="">Select item to edit</option>
+                  {products.map((product) => (
+                    <option key={product.id} value={product.id}>
+                      {product.item}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  placeholder="Item name"
+                  value={selectedProduct?.item ?? ""}
+                  disabled={!selectedProduct}
+                  onChange={(e) => handleProductChange(selectedProduct.id, "item", e.target.value)}
+                  className="form-control"
+                />
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="Unit Price /pkg"
+                  value={selectedProduct?.unit_price ?? ""}
+                  disabled={!selectedProduct}
+                  onChange={(e) => handleProductChange(selectedProduct.id, "unit_price", e.target.value)}
+                  className="form-control"
+                />
+                <ActionButton type="button" disabled={!selectedProduct} variant="confirm" onClick={() => updateProduct(selectedProduct)}>
+                  Save
+                </ActionButton>
+                <ActionButton
+                  type="button"
+                  disabled={!selectedProduct}
+                  variant="danger"
+                  onClick={() => requestDeleteProduct(selectedProduct)}
+                >
+                  Delete
+                </ActionButton>
+              </div>
+              <p className="muted-note">Last updated: {formatUpdatedAt(selectedProduct?.updated_at)}</p>
+            </div>
+          )}
+        </PagePanel>
+      )}
+
+      {activeView === "create" && (
+        <PagePanel title="Create New Invoice">
           <form onSubmit={handleCreateInvoice}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "15px", marginBottom: "15px" }}>
-              <input
-                type="text"
-                name="invoice_number"
-                value={formData.invoice_number}
-                readOnly
-                style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: "#f0f0f0", color: "#475569" }}
-              />
+            <div className="form-grid form-grid--two">
+              <input type="text" name="invoice_number" value={formData.invoice_number} readOnly className="form-control form-control--readonly" />
               <select
                 name="client_name"
                 value={formData.client_name}
                 onChange={(e) => handleInvoiceClientSelect(e.target.value)}
                 required
-                style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: "white" }}
+                className="form-control"
               >
                 <option value="">{clients.length ? "Select Client" : "Create clients first"}</option>
                 {clients.map((client) => (
@@ -1306,34 +1291,13 @@ export default function Invoice() {
                   </option>
                 ))}
               </select>
-              <input
-                type="date"
-                name="issue_date"
-                value={formData.issue_date}
-                readOnly
-                style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: "#f0f0f0", color: "#475569" }}
-              />
-              <input
-                type="date"
-                value={formData.due_date}
-                readOnly
-                style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: "#f0f0f0", color: "#475569" }}
-              />
+              <input type="date" name="issue_date" value={formData.issue_date} readOnly className="form-control form-control--readonly" />
+              <input type="date" value={formData.due_date} readOnly className="form-control form-control--readonly" />
             </div>
 
             <h4>Invoice Items</h4>
-            <div style={{ marginBottom: "15px" }}>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "2fr 1fr 1fr 1fr auto",
-                  gap: "10px",
-                  marginBottom: "6px",
-                  color: "#334155",
-                  fontSize: "0.85rem",
-                  fontWeight: 700,
-                }}
-              >
+            <div className="invoice-items">
+              <div className="invoice-item-grid invoice-item-grid--header">
                 <span>Item</span>
                 <span>Quantity</span>
                 <span>Unit price</span>
@@ -1341,12 +1305,8 @@ export default function Invoice() {
                 <span></span>
               </div>
               {formData.items.map((item, index) => (
-                <div key={index} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr auto", gap: "10px", marginBottom: "10px" }}>
-                  <select
-                    value={item.product_id}
-                    onChange={(e) => handleInvoiceItemSelect(index, e.target.value)}
-                    style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: "white" }}
-                  >
+                <div key={index} className="invoice-item-grid invoice-item-row">
+                  <select value={item.product_id} onChange={(e) => handleInvoiceItemSelect(index, e.target.value)} className="form-control">
                     <option value="">{products.length ? "Select item" : "Create products first"}</option>
                     {products.map((product) => (
                       <option key={product.id} value={product.id}>
@@ -1359,133 +1319,168 @@ export default function Invoice() {
                     placeholder="pkg"
                     value={item.quantity}
                     onChange={(e) => handleItemChange(index, "quantity", e.target.value)}
-                    style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px" }}
+                    className="form-control"
                   />
                   <input
                     type="number"
                     placeholder="Unit Price /pkg"
                     value={item.unit_price}
                     readOnly
-                    style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: "#f0f0f0", color: "#475569" }}
+                    className="form-control form-control--readonly"
                   />
-                  <input
-                    type="number"
-                    placeholder="Amount"
-                    value={item.amount}
-                    disabled
-                    style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", background: "#f0f0f0" }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => deleteItem(index)}
-                    style={{
-                      padding: "10px 14px",
-                      background: "#dc2626",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "5px",
-                      cursor: "pointer",
-                    }}
-                  >
+                  <input type="number" placeholder="Amount" value={item.amount} disabled className="form-control" />
+                  <ActionButton type="button" variant="danger" onClick={() => deleteItem(index)}>
                     Delete
-                  </button>
+                  </ActionButton>
                 </div>
               ))}
-              <button
-                type="button"
-                onClick={addItem}
-                style={{
-                  padding: "10px 15px",
-                  background: "#f0f0f0",
-                  border: "1px solid #ccc",
-                  borderRadius: "5px",
-                  cursor: "pointer",
-                }}
-              >
+              <ActionButton type="button" variant="light" onClick={addItem}>
                 + Add Item
-              </button>
+              </ActionButton>
             </div>
 
-            <div style={{ marginBottom: "15px", textAlign: "right" }}>
+            <div className="invoice-totals">
               <p><strong>Subtotal:</strong> ${subtotal.toFixed(2)}</p>
               <p><strong>GST included (10%):</strong> ${tax.toFixed(2)}</p>
-              <p style={{ fontSize: "18px", color: "#1e40af" }}><strong>Total:</strong> ${total.toFixed(2)}</p>
+              <p className="invoice-totals__total"><strong>Total:</strong> ${total.toFixed(2)}</p>
             </div>
 
-            <button
-              type="submit"
-              style={{
-                padding: "10px 20px",
-                background: "#1e40af",
-                color: "white",
-                border: "none",
-                borderRadius: "5px",
-                cursor: "pointer",
-              }}
-            >
-              Create Invoice
-            </button>
+            <ActionButton type="submit" disabled={isCreatingInvoice}>
+              {isCreatingInvoice ? "Creating..." : "Create Invoice"}
+            </ActionButton>
           </form>
-        </div>
+        </PagePanel>
       )}
 
-      <h3>Your Invoices</h3>
-      {invoices.length === 0 ? (
-        <p>No invoices yet. Create one to get started!</p>
-      ) : (
-        <table style={{ width: "100%", borderCollapse: "collapse", border: "1px solid #ccc" }}>
-          <thead>
-            <tr style={{ background: "#1e40af", color: "white" }}>
-              <th style={{ padding: "10px", textAlign: "left" }}>Invoice #</th>
-              <th style={{ padding: "10px", textAlign: "left" }}>Client</th>
-              <th style={{ padding: "10px", textAlign: "left" }}>Issue Date</th>
-              <th style={{ padding: "10px", textAlign: "right" }}>Total</th>
-              <th style={{ padding: "10px", textAlign: "center" }}>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {invoices.map((inv) => (
-              <tr key={inv.id} style={{ borderBottom: "1px solid #ccc" }}>
-                <td style={{ padding: "10px" }}>{inv.invoice_number}</td>
-                <td style={{ padding: "10px" }}>{inv.client_name}</td>
-                <td style={{ padding: "10px" }}>{inv.issue_date}</td>
-                <td style={{ padding: "10px", textAlign: "right" }}>${inv.total.toFixed(2)}</td>
-                <td style={{ padding: "10px", textAlign: "center" }}>
-                  <button
-                    onClick={() => downloadPDF(inv.id, inv.invoice_number)}
-                    style={{
-                      padding: "8px 15px",
-                      background: "#10b981",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "5px",
-                      cursor: "pointer",
-                    }}
+      {activeView === "menu" && (
+        <>
+          <h3>Your Invoices</h3>
+          <div className="invoice-filter-bar" ref={invoiceFilterRef}>
+            <input
+              type="search"
+              placeholder="Search invoice, client, date"
+              value={invoiceSearch}
+              onChange={(e) => setInvoiceSearch(e.target.value)}
+              className="form-control"
+            />
+            <select
+              value={invoiceClientFilter}
+              onChange={(e) => setInvoiceClientFilter(e.target.value)}
+              className="form-control"
+            >
+              <option value="">All clients</option>
+              {invoiceClientOptions.map((clientName) => (
+                <option key={clientName} value={clientName}>
+                  {clientName}
+                </option>
+              ))}
+            </select>
+            <div className="invoice-date-filter">
+              <button
+                type="button"
+                className="form-control invoice-date-filter__button"
+                onClick={() => openDateFilter("from", invoiceDateFrom)}
+              >
+                {formatDateDisplay(invoiceDateFrom) || "From date"}
+              </button>
+              {renderInvoiceDatePicker("from", invoiceDateFrom)}
+            </div>
+            <div className="invoice-date-filter">
+              <button
+                type="button"
+                className="form-control invoice-date-filter__button"
+                onClick={() => openDateFilter("to", invoiceDateTo)}
+              >
+                {formatDateDisplay(invoiceDateTo) || "To date"}
+              </button>
+              {renderInvoiceDatePicker("to", invoiceDateTo)}
+            </div>
+            <ActionButton
+              type="button"
+              variant="light"
+              onClick={() => {
+                setInvoiceSearch("");
+                setInvoiceClientFilter("");
+                setInvoiceDateFrom("");
+                setInvoiceDateTo("");
+              }}
+            >
+              Clear
+            </ActionButton>
+          </div>
+
+          {invoices.length === 0 ? (
+            <p>No invoices yet. Create one to get started!</p>
+          ) : filteredInvoices.length === 0 ? (
+            <p>No invoices match the current filters.</p>
+          ) : (
+            <>
+              <table className="data-table invoice-list-table">
+                <thead>
+                  <tr>
+                    <th>Invoice #</th>
+                    <th>Client</th>
+                    <th>Issue Date</th>
+                    <th className="data-table__number">Total</th>
+                    <th className="invoice-list-table__actions">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleInvoices.map((invoice) => (
+                    <tr key={invoice.id}>
+                      <td>{invoice.invoice_number}</td>
+                      <td>{invoice.client_name}</td>
+                      <td>{invoice.issue_date}</td>
+                      <td className="data-table__number">${Number(invoice.total || 0).toFixed(2)}</td>
+                      <td className="invoice-list-table__actions">
+                        <ActionButton type="button" variant="confirm" size="sm" onClick={() => downloadPDF(invoice.id, invoice.invoice_number)}>
+                          Download PDF
+                        </ActionButton>
+                        {isAdmin && (
+                          <ActionButton
+                            type="button"
+                            variant="danger"
+                            size="sm"
+                            className="invoice-list-table__delete"
+                            onClick={() => requestDeleteInvoice(invoice)}
+                          >
+                            Delete
+                          </ActionButton>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {filteredInvoices.length > INVOICE_PAGE_SIZE && (
+                <div className="pagination">
+                  <ActionButton
+                    type="button"
+                    variant={invoicePage === 1 ? "ghost" : "light"}
+                    size="sm"
+                    onClick={() => setInvoicePage((page) => Math.max(1, page - 1))}
+                    disabled={invoicePage === 1}
                   >
-                    Download PDF
-                  </button>
-                  {isAdmin && (
-                    <button
-                      onClick={() => deleteInvoice(inv.id, inv.invoice_number)}
-                      style={{
-                        padding: "8px 15px",
-                        background: "#dc2626",
-                        color: "white",
-                        border: "none",
-                        borderRadius: "5px",
-                        cursor: "pointer",
-                        marginLeft: "8px",
-                      }}
-                    >
-                      Delete
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                    Previous
+                  </ActionButton>
+                  <span className="pagination__label">
+                    Page {invoicePage} of {invoicePageCount}
+                  </span>
+                  <ActionButton
+                    type="button"
+                    variant={invoicePage === invoicePageCount ? "ghost" : "light"}
+                    size="sm"
+                    onClick={() => setInvoicePage((page) => Math.min(invoicePageCount, page + 1))}
+                    disabled={invoicePage === invoicePageCount}
+                  >
+                    Next
+                  </ActionButton>
+                </div>
+              )}
+            </>
+          )}
+        </>
       )}
-    </div>
+    </PageShell>
   );
 }

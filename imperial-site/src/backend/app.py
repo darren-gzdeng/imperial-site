@@ -140,8 +140,7 @@ def record_stock_history(
 # Database helper
 # -------------------------
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA cache_size=1000")
     conn.execute("PRAGMA temp_store=MEMORY")
@@ -153,6 +152,7 @@ def get_db():
 # -------------------------
 def init_db():
     conn = get_db()
+    conn.execute("PRAGMA journal_mode=WAL")
     cursor = conn.cursor()
 
     schema_path = os.path.join(BASE_DIR, "schema.sql")
@@ -313,6 +313,11 @@ def init_db():
     history_columns = {column[1] for column in cursor.fetchall()}
     if "created_by" not in history_columns:
         cursor.execute("ALTER TABLE stock_history ADD COLUMN created_by INTEGER")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_stock_history_product_id_id ON stock_history(product_id, id DESC)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_stock_history_reference ON stock_history(reference_type, reference_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_invoices_created_at ON invoices(created_at DESC)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_item ON products(item)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_clients_client_name ON clients(client_name)")
 
     conn.commit()
     conn.close()
@@ -1079,11 +1084,20 @@ def get_inventory_history(user, product_id):
     cursor = conn.cursor()
 
     try:
+        page = max(1, request.args.get("page", default=1, type=int))
+        page_size = request.args.get("page_size", default=8, type=int)
+        page_size = min(max(1, page_size), 100)
         cursor.execute("SELECT id, item FROM products WHERE id=?", (product_id,))
         product = cursor.fetchone()
 
         if not product:
             return jsonify({"error": "Product not found"}), 404
+
+        cursor.execute("SELECT COUNT(*) FROM stock_history WHERE product_id=?", (product_id,))
+        total_count = cursor.fetchone()[0]
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
+        page = min(page, total_pages)
+        offset = (page - 1) * page_size
 
         cursor.execute("""
             SELECT stock_history.id, stock_history.change_quantity, stock_history.stock_after,
@@ -1094,12 +1108,19 @@ def get_inventory_history(user, product_id):
             LEFT JOIN users ON users.id = stock_history.created_by
             WHERE stock_history.product_id=?
             ORDER BY stock_history.id DESC
-        """, (product_id,))
+            LIMIT ? OFFSET ?
+        """, (product_id, page_size, offset))
         rows = cursor.fetchall()
 
         return jsonify({
             "product_id": product_id,
             "item": product[1],
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total_count": total_count,
+                "total_pages": total_pages,
+            },
             "history": [
                 {
                     "id": row[0],

@@ -1,111 +1,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
-
-const styles = {
-  page: {
-    padding: "20px 20px 8px",
-    background: "#ffffff",
-    color: "#1c1e23",
-  },
-  shell: {
-    maxWidth: "540px",
-    margin: "0 auto",
-    textAlign: "center",
-  },
-  title: {
-    margin: "0 0 34px",
-    fontSize: "2.75rem",
-    fontWeight: 400,
-    letterSpacing: "-0.06em",
-    lineHeight: 1,
-  },
-  googleButton: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    width: "100%",
-    padding: "0 14px",
-    height: "42px",
-    border: "1.5px solid #9b9b9b",
-    borderRadius: "8px",
-    background: "#ffffff",
-    cursor: "pointer",
-  },
-  googleLogo: {
-    width: "18px",
-    height: "18px",
-    flexShrink: 0,
-  },
-  googleText: {
-    flex: 1,
-    textAlign: "center",
-    fontSize: "0.82rem",
-    fontWeight: 400,
-    color: "#111111",
-    marginRight: "18px",
-  },
-  dividerRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: "14px",
-    margin: "24px 0 24px",
-  },
-  dividerLine: {
-    flex: 1,
-    height: "1.5px",
-    background: "#1d1d1d",
-  },
-  dividerText: {
-    fontSize: "0.82rem",
-    color: "#484848",
-    letterSpacing: "0.08em",
-  },
-  form: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "14px",
-    alignItems: "stretch",
-  },
-  input: {
-    width: "100%",
-    height: "56px",
-    padding: "0 22px",
-    border: "1.5px solid #9b9b9b",
-    borderRadius: "14px",
-    fontSize: "0.9rem",
-    color: "#111111",
-    outline: "none",
-    background: "#ffffff",
-  },
-  passwordInput: {
-    borderWidth: "2px",
-  },
-  submitWrap: {
-    marginTop: "10px",
-    display: "flex",
-    justifyContent: "center",
-  },
-  submitButton: {
-    minWidth: "148px",
-    height: "48px",
-    borderRadius: "14px",
-    border: "1.5px solid #23252a",
-    background: "#7fa8df",
-    color: "#ffffff",
-    fontSize: "0.92rem",
-    fontWeight: 500,
-    cursor: "pointer",
-  },
-  message: {
-    marginTop: "12px",
-    color: "#4b5563",
-    fontSize: "0.82rem",
-  },
-};
+import { register } from "../api/authApi";
 
 function GoogleLogo() {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" style={styles.googleLogo}>
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="auth-google-logo">
       <path
         fill="#EA4335"
         d="M12.24 10.285v3.888h5.414c-.234 1.26-.938 2.327-2 3.043l3.234 2.51c1.886-1.74 2.972-4.302 2.972-7.351 0-.716-.064-1.404-.182-2.09H12.24z"
@@ -139,29 +38,9 @@ export default function Register() {
     e.preventDefault();
 
     try {
-      const res = await fetch("http://127.0.0.1:5000/register", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email, password, first_name: firstName, last_name: lastName }),
-      });
-
-      const raw = await res.text();
-      let data = {};
-
-      try {
-        data = raw ? JSON.parse(raw) : {};
-      } catch {
-        data = { error: raw || "Unexpected server response" };
-      }
-
-      if (res.ok) {
-        setMessage("Account created");
-        setTimeout(() => navigate("/login"), 1000);
-      } else {
-        setMessage(data.error || "Registration failed");
-      }
+      await register({ email, password, first_name: firstName, last_name: lastName });
+      setMessage("Account created");
+      setTimeout(() => navigate("/login"), 1000);
     } catch (err) {
       setMessage(`Server error: ${err.message}`);
     }
@@ -172,28 +51,28 @@ export default function Register() {
   };
 
   return (
-    <div style={styles.page}>
-      <div style={styles.shell}>
-        <h1 style={styles.title}>Create account</h1>
+    <div className="auth-page">
+      <div className="auth-shell">
+        <h1 className="auth-title">Create account</h1>
 
-        <button type="button" onClick={handleGoogleSignup} style={styles.googleButton}>
+        <button type="button" onClick={handleGoogleSignup} className="auth-google-button">
           <GoogleLogo />
-          <span style={styles.googleText}>Sign up with Google</span>
+          <span className="auth-google-text">Sign up with Google</span>
         </button>
 
-        <div style={styles.dividerRow}>
-          <div style={styles.dividerLine}></div>
-          <span style={styles.dividerText}>OR</span>
-          <div style={styles.dividerLine}></div>
+        <div className="auth-divider">
+          <div className="auth-divider__line"></div>
+          <span className="auth-divider__text">OR</span>
+          <div className="auth-divider__line"></div>
         </div>
 
-        <form onSubmit={handleRegister} style={styles.form}>
+        <form onSubmit={handleRegister} className="auth-form">
           <input
             type="text"
             placeholder="First name"
             value={firstName}
             onChange={(e) => setFirstName(e.target.value)}
-            style={styles.input}
+            className="auth-input"
           />
 
           <input
@@ -201,7 +80,7 @@ export default function Register() {
             placeholder="Last name"
             value={lastName}
             onChange={(e) => setLastName(e.target.value)}
-            style={styles.input}
+            className="auth-input"
           />
 
           <input
@@ -209,7 +88,7 @@ export default function Register() {
             placeholder="Email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            style={styles.input}
+            className="auth-input"
             required
           />
 
@@ -218,18 +97,18 @@ export default function Register() {
             placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            style={{ ...styles.input, ...styles.passwordInput }}
+            className="auth-input auth-input--strong"
             required
           />
 
-          <div style={styles.submitWrap}>
-            <button type="submit" style={styles.submitButton}>
+          <div className="auth-submit-row">
+            <button type="submit" className="auth-submit-button">
               Create
             </button>
           </div>
         </form>
 
-        {message ? <p style={styles.message}>{message}</p> : null}
+        {message ? <p className="auth-message">{message}</p> : null}
       </div>
     </div>
   );
