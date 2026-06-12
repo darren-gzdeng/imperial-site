@@ -624,7 +624,7 @@ export default function Invoice() {
     setIsCreatingInvoice(true);
 
     try {
-      await createInvoiceApi({
+      const createdInvoice = await createInvoiceApi({
         user_id: userId,
         invoice_number: formData.invoice_number,
         client_name: formData.client_name,
@@ -636,8 +636,9 @@ export default function Invoice() {
         total,
       });
 
-      const refreshedInvoices = await loadInvoices(userId);
-      setFormData(createInitialFormData(refreshedInvoices));
+      const nextInvoices = [createdInvoice, ...invoices];
+      setInvoices(nextInvoices);
+      setFormData(createInitialFormData(nextInvoices));
       applyInvoiceStockChange(formData.items);
       setActiveView("menu");
       setInvoiceNotice({

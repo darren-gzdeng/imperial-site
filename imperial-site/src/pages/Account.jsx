@@ -22,9 +22,10 @@ export default function Account() {
   const [adminMessage, setAdminMessage] = useState("");
   const [savingUserId, setSavingUserId] = useState(null);
   const [deletingUserId, setDeletingUserId] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
+    const token = getAuthToken();
     if (!token) {
       window.location.href = "/imperial-site/login";
       return;
@@ -168,7 +169,15 @@ export default function Account() {
     }
   };
 
-  const handleManagedUserDelete = async (managedUser) => {
+  const requestManagedUserDelete = (managedUser) => {
+    setDeleteTarget(managedUser);
+  };
+
+  const confirmManagedUserDelete = async () => {
+    if (!deleteTarget) {
+      return;
+    }
+
     const token = getAuthToken();
 
     if (!token) {
@@ -176,20 +185,15 @@ export default function Account() {
       return;
     }
 
-    const confirmed = window.confirm(`Delete ${managedUser.email}? This cannot be undone.`);
-
-    if (!confirmed) {
-      return;
-    }
-
-    setDeletingUserId(managedUser.id);
+    setDeletingUserId(deleteTarget.id);
     setAdminMessage("");
 
     try {
-      await deleteAdminUser(managedUser.id);
+      await deleteAdminUser(deleteTarget.id);
 
-      setAdminUsers((prev) => prev.filter((item) => item.id !== managedUser.id));
+      setAdminUsers((prev) => prev.filter((item) => item.id !== deleteTarget.id));
       setAdminMessage("User deleted.");
+      setDeleteTarget(null);
     } catch (err) {
       if (err.status === 401) {
         clearAuthToken();
@@ -213,6 +217,35 @@ export default function Account() {
 
   return (
     <PageShell title="Account" className="account-shell">
+      {deleteTarget && (
+        <div className="account-modal" role="dialog" aria-modal="true" aria-labelledby="account-delete-title">
+          <div className="account-modal__card">
+            <h3 id="account-delete-title">Delete user</h3>
+            <p>
+              Delete {deleteTarget.email}? This cannot be undone.
+            </p>
+            <div className="account-modal__actions">
+              <ActionButton
+                type="button"
+                variant="light"
+                onClick={() => setDeleteTarget(null)}
+                disabled={deletingUserId === deleteTarget.id}
+              >
+                Cancel
+              </ActionButton>
+              <ActionButton
+                type="button"
+                variant="danger"
+                onClick={confirmManagedUserDelete}
+                disabled={deletingUserId === deleteTarget.id}
+              >
+                {deletingUserId === deleteTarget.id ? "Deleting..." : "Delete user"}
+              </ActionButton>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="account-actions">
         <button onClick={handleLogout} className="account-logout">
           <LogOut size={22} strokeWidth={1.7} />
@@ -364,7 +397,7 @@ export default function Account() {
                             type="button"
                             size="sm"
                             variant="danger"
-                            onClick={() => handleManagedUserDelete(managedUser)}
+                            onClick={() => requestManagedUserDelete(managedUser)}
                             disabled={managedUser.id === user.id || deletingUserId === managedUser.id}
                             title={managedUser.id === user.id ? "You cannot delete your own account" : "Delete user"}
                           >

@@ -21,8 +21,19 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 
 app = Flask(__name__)
-CORS(app)
-app.config['SECRET_KEY'] = 'super_secret_key'
+DEFAULT_CORS_ORIGINS = ",".join([
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+])
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", DEFAULT_CORS_ORIGINS).split(",")
+    if origin.strip()
+]
+CORS(app, resources={r"/*": {"origins": CORS_ORIGINS}})
+app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "dev_secret_key_change_me")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "users.db")
@@ -135,6 +146,23 @@ def record_stock_history(
         sydney_timestamp(),
         created_by,
     ))
+
+
+def serialize_invoice_row(row):
+    return {
+        "id": row[0],
+        "user_id": row[1],
+        "invoice_number": row[2],
+        "client_name": row[3],
+        "issue_date": row[4],
+        "due_date": row[5],
+        "items": json.loads(row[6]),
+        "subtotal": row[7],
+        "tax": row[8],
+        "total": row[9],
+        "status": row[10],
+        "created_at": row[11],
+    }
 
 # -------------------------
 # Database helper
@@ -1312,7 +1340,14 @@ def create_invoice(user):
                     created_by=user["user_id"],
                 )
             conn.commit()
-            return jsonify({"message": "Invoice created successfully", "invoice_id": invoice_id}), 201
+            cursor.execute("""
+                SELECT id, user_id, invoice_number, client_name, issue_date, due_date,
+                       items, subtotal, tax, total, status, created_at
+                FROM invoices
+                WHERE id=?
+            """, (invoice_id,))
+            invoice = serialize_invoice_row(cursor.fetchone())
+            return jsonify(invoice), 201
         except sqlite3.IntegrityError as e:
             return jsonify({"error": f"Invoice number already exists or database error: {str(e)}"}), 400
         except sqlite3.OperationalError as e:
@@ -1334,26 +1369,14 @@ def get_invoices(user, user_id):
     cursor = conn.cursor()
 
     try:
-        cursor.execute("SELECT * FROM invoices ORDER BY created_at DESC")
+        cursor.execute("""
+            SELECT id, user_id, invoice_number, client_name, issue_date, due_date,
+                   items, subtotal, tax, total, status, created_at
+            FROM invoices
+            ORDER BY created_at DESC
+        """)
         invoices = cursor.fetchall()
-        
-        invoice_list = []
-        for inv in invoices:
-            invoice_list.append({
-                "id": inv[0],
-                "user_id": inv[1],
-                "invoice_number": inv[2],
-                "client_name": inv[3],
-                "issue_date": inv[4],
-                "due_date": inv[5],
-                "items": json.loads(inv[6]),
-                "subtotal": inv[7],
-                "tax": inv[8],
-                "total": inv[9],
-                "status": inv[10],
-                "created_at": inv[11]
-            })
-        
+        invoice_list = [serialize_invoice_row(inv) for inv in invoices]
         return jsonify(invoice_list)
     finally:
         conn.close()
@@ -1835,4 +1858,8 @@ def generate_invoice_pdf(user, invoice_id):
 # Run server
 # -------------------------
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(
+        host=os.getenv("FLASK_HOST", "127.0.0.1"),
+        port=int(os.getenv("FLASK_PORT", "5000")),
+        debug=os.getenv("FLASK_DEBUG", "1") == "1",
+    )
