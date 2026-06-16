@@ -20,6 +20,11 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 
+try:
+    import stripe
+except ImportError:
+    stripe = None
+
 app = Flask(__name__)
 DEFAULT_CORS_ORIGINS = ",".join([
     "http://localhost:5173",
@@ -37,12 +42,43 @@ app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "dev_secret_key_change_me")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "users.db")
+
+
+def load_local_env():
+    env_paths = [
+        os.path.join(BASE_DIR, ".env.local"),
+        os.path.join(BASE_DIR, ".env"),
+        os.path.join(os.path.dirname(BASE_DIR), ".env.local"),
+        os.path.join(os.path.dirname(BASE_DIR), ".env"),
+    ]
+
+    for env_path in env_paths:
+        if not os.path.exists(env_path):
+            continue
+
+        with open(env_path, "r", encoding="utf-8") as env_file:
+            for line in env_file:
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#") or "=" not in stripped:
+                    continue
+
+                key, value = stripped.split("=", 1)
+                os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+load_local_env()
 SYDNEY_TZ = ZoneInfo("Australia/Sydney")
 ACCOUNT_TYPES = ("Admin", "Staff", "User", "Wholesale Customer")
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173/imperial-site")
+STRIPE_CURRENCY = os.getenv("STRIPE_CURRENCY", "aud")
 
 
 def sydney_timestamp():
     return datetime.datetime.now(SYDNEY_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
+def utc_iso_timestamp(minutes=0):
+    return (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=minutes)).isoformat()
 
 
 def utc_timestamp_to_sydney(value):
@@ -69,6 +105,22 @@ def normalize_quantity(value):
     return quantity
 
 
+def calculate_retail_price(unit_price):
+    return round(round(float(unit_price) * 1.3 * 10) / 10, 2)
+
+
+def price_to_cents(value):
+    return int(round(float(value) * 100))
+
+
+def calculate_shipping(subtotal):
+    if subtotal >= 85:
+        return 0
+    if subtotal >= 39:
+        return 6.5
+    return 15
+
+
 def ensure_inventory_rows(cursor):
     cursor.execute("""
         INSERT INTO inventory (product_id, stock_quantity)
@@ -77,6 +129,47 @@ def ensure_inventory_rows(cursor):
         LEFT JOIN inventory ON inventory.product_id = products.id
         WHERE inventory.id IS NULL
     """)
+
+
+def release_expired_reservations(cursor):
+    cursor.execute("""
+        SELECT id, reservation_token
+        FROM stock_reservations
+        WHERE status='active' AND expires_at <= ?
+    """, (utc_iso_timestamp(),))
+    expired_reservations = cursor.fetchall()
+
+    for reservation_id, reservation_token in expired_reservations:
+        cursor.execute("""
+            SELECT product_id, quantity
+            FROM stock_reservation_items
+            WHERE reservation_id=?
+        """, (reservation_id,))
+        items = cursor.fetchall()
+
+        for product_id, quantity in items:
+            cursor.execute("""
+                UPDATE inventory
+                SET stock_quantity = stock_quantity + ?
+                WHERE product_id=?
+            """, (quantity, product_id))
+            cursor.execute("SELECT stock_quantity FROM inventory WHERE product_id=?", (product_id,))
+            stock_after = cursor.fetchone()[0]
+            record_stock_history(
+                cursor,
+                product_id,
+                quantity,
+                stock_after,
+                "checkout_reservation_expired",
+                "Checkout reservation expired after 10 minutes",
+                reference_type="checkout_reservation",
+                reference_id=reservation_id,
+            )
+
+        cursor.execute(
+            "UPDATE stock_reservations SET status='expired' WHERE id=?",
+            (reservation_id,)
+        )
 
 
 def resolve_invoice_item_product(cursor, item):
@@ -212,7 +305,7 @@ def init_db():
 
     cursor.execute("PRAGMA table_info(products)")
     product_columns = {column[1] for column in cursor.fetchall()}
-    expected_product_columns = {"id", "item", "sku", "weight", "unit_price", "updated_at"}
+    expected_product_columns = {"id", "item", "sku", "weight", "unit_price", "retail_price", "updated_at"}
     if product_columns and product_columns != expected_product_columns:
         cursor.execute("ALTER TABLE products RENAME TO products_old")
         cursor.execute("""
@@ -222,6 +315,7 @@ def init_db():
             sku TEXT UNIQUE,
             weight REAL,
             unit_price REAL NOT NULL,
+            retail_price REAL NOT NULL,
             updated_at TIMESTAMP
         )
         """)
@@ -229,11 +323,12 @@ def init_db():
         item_expression = "item" if "item" in product_columns else "name"
         sku_expression = "sku" if "sku" in product_columns else "NULL"
         weight_expression = "weight" if "weight" in product_columns else "NULL"
+        retail_price_expression = "retail_price" if "retail_price" in product_columns else "ROUND(ROUND(unit_price * 1.3 * 10) / 10.0, 2)"
         updated_at_expression = "updated_at" if "updated_at" in product_columns else "NULL"
 
         cursor.execute(f"""
-            INSERT INTO products (id, item, sku, weight, unit_price, updated_at)
-            SELECT id, {item_expression}, {sku_expression}, {weight_expression}, unit_price, {updated_at_expression}
+            INSERT INTO products (id, item, sku, weight, unit_price, retail_price, updated_at)
+            SELECT id, {item_expression}, {sku_expression}, {weight_expression}, unit_price, {retail_price_expression}, {updated_at_expression}
             FROM products_old
             WHERE {item_expression} IS NOT NULL AND {item_expression} != ''
         """)
@@ -343,6 +438,8 @@ def init_db():
         cursor.execute("ALTER TABLE stock_history ADD COLUMN created_by INTEGER")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_stock_history_product_id_id ON stock_history(product_id, id DESC)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_stock_history_reference ON stock_history(reference_type, reference_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_stock_reservations_status_expires ON stock_reservations(status, expires_at)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_stock_reservation_items_reservation ON stock_reservation_items(reservation_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_invoices_created_at ON invoices(created_at DESC)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_item ON products(item)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_clients_client_name ON clients(client_name)")
@@ -648,16 +745,16 @@ def dashboard(user):
 # Products
 # -------------------------
 @app.route('/products', methods=['GET'])
-@staff_or_admin_required
-def get_products(user):
+def get_products():
     conn = get_db()
     cursor = conn.cursor()
 
     try:
         ensure_inventory_rows(cursor)
+        release_expired_reservations(cursor)
         conn.commit()
         cursor.execute("""
-            SELECT products.id, products.item, products.sku, products.weight, products.unit_price,
+            SELECT products.id, products.item, products.sku, products.weight, products.unit_price, products.retail_price,
                    products.updated_at, COALESCE(inventory.stock_quantity, 0)
             FROM products
             LEFT JOIN inventory ON inventory.product_id = products.id
@@ -672,8 +769,9 @@ def get_products(user):
                 "sku": product[2] or "",
                 "weight": product[3],
                 "unit_price": product[4],
-                "updated_at": product[5],
-                "stock_quantity": product[6],
+                "retail_price": product[5],
+                "updated_at": product[6],
+                "stock_quantity": product[7],
             }
             for product in products
         ])
@@ -707,9 +805,10 @@ def create_product(user):
 
     try:
         updated_at = sydney_timestamp()
+        retail_price = calculate_retail_price(unit_price)
         cursor.execute(
-            "INSERT INTO products (item, unit_price, updated_at) VALUES (?, ?, ?)",
-            (item, unit_price, updated_at)
+            "INSERT INTO products (item, unit_price, retail_price, updated_at) VALUES (?, ?, ?, ?)",
+            (item, unit_price, retail_price, updated_at)
         )
         product_id = cursor.lastrowid
         cursor.execute(
@@ -733,6 +832,7 @@ def create_product(user):
             "sku": "",
             "weight": None,
             "unit_price": unit_price,
+            "retail_price": retail_price,
             "updated_at": updated_at,
             "stock_quantity": stock_quantity,
         }), 201
@@ -761,11 +861,12 @@ def update_product(user, product_id):
 
     try:
         updated_at = sydney_timestamp()
+        retail_price = calculate_retail_price(unit_price)
         cursor.execute("""
             UPDATE products
-            SET item=?, unit_price=?, updated_at=?
+            SET item=?, unit_price=?, retail_price=?, updated_at=?
             WHERE id=?
-        """, (item, unit_price, updated_at, product_id))
+        """, (item, unit_price, retail_price, updated_at, product_id))
 
         if cursor.rowcount == 0:
             return jsonify({"error": "Product not found"}), 404
@@ -775,6 +876,7 @@ def update_product(user, product_id):
             "id": product_id,
             "item": item,
             "unit_price": unit_price,
+            "retail_price": retail_price,
             "updated_at": updated_at,
         })
     finally:
@@ -968,6 +1070,7 @@ def get_inventory(user):
 
     try:
         ensure_inventory_rows(cursor)
+        release_expired_reservations(cursor)
         conn.commit()
         cursor.execute("""
             SELECT products.id, products.item, products.unit_price, products.updated_at,
@@ -1168,6 +1271,255 @@ def get_inventory_history(user, product_id):
                 for row in rows
             ],
         })
+    finally:
+        conn.close()
+
+
+# -------------------------
+# Checkout stock reservations
+# -------------------------
+def resolve_checkout_product(cursor, item):
+    product_id = item.get("product_id") or item.get("backend_product_id")
+
+    if product_id not in (None, ""):
+        cursor.execute("SELECT id, item FROM products WHERE id=?", (product_id,))
+        product = cursor.fetchone()
+        if product:
+            return product[0], product[1]
+
+    name = (item.get("backend_item") or item.get("name") or "").strip()
+    if not name:
+        return None, ""
+
+    cursor.execute("SELECT id, item FROM products WHERE item=? ORDER BY id LIMIT 1", (name,))
+    product = cursor.fetchone()
+    if product:
+        return product[0], product[1]
+
+    cursor.execute("SELECT id, item FROM products WHERE item LIKE ? ORDER BY id LIMIT 1", (f"{name}%",))
+    product = cursor.fetchone()
+    if product:
+        return product[0], product[1]
+
+    return None, name
+
+
+@app.route('/checkout/reserve', methods=['POST'])
+def reserve_checkout_stock():
+    data = request.json or {}
+    items = data.get("items") or []
+
+    if not items:
+        return jsonify({"error": "Cart is empty"}), 400
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        ensure_inventory_rows(cursor)
+        release_expired_reservations(cursor)
+
+        movements = {}
+        labels = {}
+
+        for item in items:
+            product_id, label = resolve_checkout_product(cursor, item)
+            quantity = normalize_quantity(item.get("quantity"))
+
+            if not product_id:
+                conn.rollback()
+                return jsonify({
+                    "error": f"Product is out of stock: {label or 'Unknown product'}",
+                    "out_of_stock": True,
+                }), 409
+
+            if quantity is None:
+                conn.rollback()
+                return jsonify({"error": "Cart quantity must be greater than zero"}), 400
+
+            movements[product_id] = movements.get(product_id, 0) + quantity
+            labels[product_id] = label
+
+        for product_id, quantity in movements.items():
+            cursor.execute("SELECT stock_quantity FROM inventory WHERE product_id=?", (product_id,))
+            stock_row = cursor.fetchone()
+            available = stock_row[0] if stock_row else 0
+
+            if available < quantity:
+                conn.rollback()
+                return jsonify({
+                    "error": f"{labels.get(product_id, 'Product')} is out of stock.",
+                    "out_of_stock": True,
+                    "available": available,
+                    "requested": quantity,
+                }), 409
+
+        reservation_token = secrets.token_urlsafe(24)
+        expires_at = utc_iso_timestamp(minutes=10)
+        cursor.execute("""
+            INSERT INTO stock_reservations (reservation_token, status, expires_at, created_at)
+            VALUES (?, 'active', ?, ?)
+        """, (reservation_token, expires_at, utc_iso_timestamp()))
+        reservation_id = cursor.lastrowid
+
+        for product_id, quantity in movements.items():
+            cursor.execute("""
+                UPDATE inventory
+                SET stock_quantity = stock_quantity - ?
+                WHERE product_id=?
+            """, (quantity, product_id))
+            cursor.execute("""
+                INSERT INTO stock_reservation_items (reservation_id, product_id, quantity)
+                VALUES (?, ?, ?)
+            """, (reservation_id, product_id, quantity))
+            cursor.execute("SELECT stock_quantity FROM inventory WHERE product_id=?", (product_id,))
+            stock_after = cursor.fetchone()[0]
+            record_stock_history(
+                cursor,
+                product_id,
+                -quantity,
+                stock_after,
+                "checkout_reserved",
+                "Reserved for checkout for 10 minutes",
+                reference_type="checkout_reservation",
+                reference_id=reservation_id,
+            )
+
+        conn.commit()
+        return jsonify({
+            "reservation_token": reservation_token,
+            "expires_at": expires_at,
+            "expires_in_seconds": 600,
+        }), 201
+    finally:
+        conn.close()
+
+
+@app.route('/checkout/reservations/<reservation_token>/complete', methods=['POST'])
+def complete_checkout_reservation(reservation_token):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        release_expired_reservations(cursor)
+        cursor.execute("""
+            SELECT id, status
+            FROM stock_reservations
+            WHERE reservation_token=?
+        """, (reservation_token,))
+        reservation = cursor.fetchone()
+
+        if not reservation:
+            conn.rollback()
+            return jsonify({"error": "Reservation not found"}), 404
+
+        reservation_id, status = reservation
+
+        if status != "active":
+            conn.rollback()
+            return jsonify({"error": "Reservation is no longer active"}), 409
+
+        cursor.execute(
+            "UPDATE stock_reservations SET status='completed' WHERE id=?",
+            (reservation_id,)
+        )
+        conn.commit()
+        return jsonify({"message": "Checkout completed"})
+    finally:
+        conn.close()
+
+
+@app.route('/checkout/stripe-session', methods=['POST'])
+def create_stripe_checkout_session():
+    if stripe is None:
+        return jsonify({"error": "Stripe is not installed on the backend"}), 500
+
+    stripe_secret_key = os.getenv("STRIPE_SECRET_KEY")
+    if not stripe_secret_key:
+        return jsonify({"error": "Stripe is not configured. Set STRIPE_SECRET_KEY in the backend environment."}), 500
+
+    data = request.json or {}
+    reservation_token = (data.get("reservation_token") or "").strip()
+
+    if not reservation_token:
+        return jsonify({"error": "Reservation token is required"}), 400
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        release_expired_reservations(cursor)
+        cursor.execute("""
+            SELECT id, status
+            FROM stock_reservations
+            WHERE reservation_token=?
+        """, (reservation_token,))
+        reservation = cursor.fetchone()
+
+        if not reservation:
+            conn.rollback()
+            return jsonify({"error": "Reservation not found"}), 404
+
+        reservation_id, status = reservation
+
+        if status != "active":
+            conn.rollback()
+            return jsonify({"error": "Reservation is no longer active"}), 409
+
+        cursor.execute("""
+            SELECT products.item, products.retail_price, stock_reservation_items.quantity
+            FROM stock_reservation_items
+            JOIN products ON products.id = stock_reservation_items.product_id
+            WHERE stock_reservation_items.reservation_id=?
+        """, (reservation_id,))
+        reserved_items = cursor.fetchall()
+        conn.commit()
+
+        if not reserved_items:
+            return jsonify({"error": "Reservation has no items"}), 400
+
+        line_items = []
+        subtotal = 0
+
+        for item_name, retail_price, quantity in reserved_items:
+            quantity_int = int(quantity)
+            subtotal += float(retail_price) * quantity
+            line_items.append({
+                "price_data": {
+                    "currency": STRIPE_CURRENCY,
+                    "product_data": {"name": item_name},
+                    "unit_amount": price_to_cents(retail_price),
+                },
+                "quantity": quantity_int,
+            })
+
+        shipping = calculate_shipping(subtotal)
+        if shipping > 0:
+            line_items.append({
+                "price_data": {
+                    "currency": STRIPE_CURRENCY,
+                    "product_data": {"name": "Shipping"},
+                    "unit_amount": price_to_cents(shipping),
+                },
+                "quantity": 1,
+            })
+
+        stripe.api_key = stripe_secret_key
+        session = stripe.checkout.Session.create(
+            mode="payment",
+            line_items=line_items,
+            success_url=f"{FRONTEND_BASE_URL}/checkout/success?reservation_token={reservation_token}&session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{FRONTEND_BASE_URL}/checkout",
+            metadata={
+                "reservation_token": reservation_token,
+                "reservation_id": str(reservation_id),
+            },
+        )
+
+        return jsonify({"url": session.url})
+    except stripe.error.StripeError as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 502
     finally:
         conn.close()
 

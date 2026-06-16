@@ -30,6 +30,9 @@ a {
 }
 
 .site-header {
+  position: sticky;
+  top: 0;
+  z-index: 900;
   background: rgb(25, 25, 25);
   color: white;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
@@ -88,6 +91,7 @@ a {
 }
 
 .icon-btn {
+  position: relative;
   background: transparent;
   border: none;
   color: rgba(255, 255, 255, 0.9);
@@ -97,6 +101,25 @@ a {
   justify-content: center;
   padding: 6px;
   transition: color 0.2s ease, transform 0.2s ease;
+}
+
+.cart-count-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #191919;
+  font-family: "Inter", sans-serif;
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1;
 }
 
 .icon-btn:hover {

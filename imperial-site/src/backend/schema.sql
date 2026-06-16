@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS products (
     sku TEXT UNIQUE,
     weight REAL,
     unit_price REAL NOT NULL,
+    retail_price REAL NOT NULL,
     updated_at TIMESTAMP
 );
 
@@ -54,6 +55,23 @@ CREATE TABLE IF NOT EXISTS stock_history (
     created_by INTEGER,
     FOREIGN KEY (product_id) REFERENCES products(id),
     FOREIGN KEY (created_by) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS stock_reservations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reservation_token TEXT UNIQUE NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS stock_reservation_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reservation_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL,
+    quantity REAL NOT NULL,
+    FOREIGN KEY (reservation_id) REFERENCES stock_reservations(id),
+    FOREIGN KEY (product_id) REFERENCES products(id)
 );
 
 CREATE TABLE IF NOT EXISTS orders (

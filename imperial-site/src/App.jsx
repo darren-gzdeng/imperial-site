@@ -13,6 +13,8 @@ import Register from "./pages/Register";
 import ForgotPassword from "./pages/ForgotPassword";
 import Account from "./pages/Account";
 import Cart from "./pages/Cart";
+import Checkout from "./pages/Checkout";
+import CheckoutSuccess from "./pages/CheckoutSuccess";
 import Invoice from "./pages/Invoice";
 import ChefRecipe from "./pages/ChefRecipe";
 import RecipeDetail from "./pages/RecipeDetail";
@@ -44,6 +46,8 @@ export default function App() {
         <Route path="privacy-policy" element={<PrivacyPolicy />} />
         <Route path="terms-of-service" element={<TermsOfService />} />
       </Route>
+      <Route path="checkout" element={<Checkout />} />
+      <Route path="checkout/success" element={<CheckoutSuccess />} />
     </Routes>
   );
 }
