@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
 import { FileText, LogOut, Save, Trash2, Users } from "lucide-react";
 import {
   deleteAdminUser,
   getAccount,
+  getAccountOrders,
   getAdminUsers,
   updateAccount,
   updateUserAccountType,
@@ -12,6 +14,9 @@ import { PagePanel, PageShell } from "../components/layout/PageShell";
 import ActionButton from "../components/ui/ActionButton";
 
 const ACCOUNT_TYPES = ["Admin", "Staff", "User", "Wholesale Customer"];
+
+const formatMoney = (value) => `$${Number(value || 0).toFixed(2)}`;
+const formatStatus = (status) => String(status || "pending").replaceAll("_", " ");
 
 export default function Account() {
   const [user, setUser] = useState(null);
@@ -23,6 +28,9 @@ export default function Account() {
   const [savingUserId, setSavingUserId] = useState(null);
   const [deletingUserId, setDeletingUserId] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [orders, setOrders] = useState([]);
+  const [ordersMessage, setOrdersMessage] = useState("");
+  const [selectedOrderId, setSelectedOrderId] = useState(null);
 
   useEffect(() => {
     const token = getAuthToken();
@@ -37,6 +45,7 @@ export default function Account() {
 
         setUser(data);
         setFormData(data);
+        fetchOrders();
 
         if (data.account_type === "Admin") {
           fetchAdminUsers();
@@ -54,6 +63,23 @@ export default function Account() {
 
     fetchAccount();
   }, []);
+
+  const fetchOrders = async () => {
+    try {
+      const data = await getAccountOrders();
+      setOrders(data);
+      setSelectedOrderId(data[0]?.id || null);
+      setOrdersMessage("");
+    } catch (err) {
+      if (err.status === 401) {
+        clearAuthToken();
+        window.location.href = "/imperial-site/login";
+        return;
+      }
+
+      setOrdersMessage(`Failed to load orders: ${err.message}`);
+    }
+  };
 
   const fetchAdminUsers = async () => {
     try {
@@ -261,7 +287,75 @@ export default function Account() {
       </div>
 
       <PagePanel title="Order history">
-        <p className="account-section-text">You haven&apos;t placed any orders yet.</p>
+        {ordersMessage && <p className="account-message">{ordersMessage}</p>}
+        {orders.length === 0 ? (
+          <p className="account-section-text">You haven&apos;t placed any orders yet.</p>
+        ) : (
+          <div className="account-orders">
+            {orders.map((order) => {
+              const isOpen = selectedOrderId === order.id;
+              const deliveryStatus = order.tracking_status || order.status;
+              const canTrack = deliveryStatus !== "delivered";
+
+              return (
+                <section key={order.id} className="account-order">
+                  <button
+                    type="button"
+                    className="account-order__summary"
+                    aria-expanded={isOpen}
+                    onClick={() => setSelectedOrderId(isOpen ? null : order.id)}
+                  >
+                    <span>
+                      <strong>Order #{order.id}</strong>
+                      <small>{order.created_at || "No date"}</small>
+                    </span>
+                    <span>{formatStatus(deliveryStatus)}</span>
+                    <strong>{formatMoney(order.total)}</strong>
+                  </button>
+
+                  {isOpen && (
+                    <div className="account-order__details">
+                      <div className="account-order__meta">
+                        <p><strong>Delivery address:</strong> {order.shipping_address}</p>
+                        <p><strong>Driver:</strong> {order.driver_name || "Not assigned yet"}</p>
+                        <p><strong>ETA:</strong> {order.eta_text || "Waiting for driver location"}</p>
+                      </div>
+
+                      <div className="account-order__items">
+                        {order.items.map((item) => (
+                          <div key={item.id} className="account-order__item">
+                            <span>
+                              <strong>{item.item}</strong>
+                              <small>Quantity: {item.quantity}</small>
+                            </span>
+                            <span>{formatMoney(item.unit_price)}</span>
+                            <strong>{formatMoney(item.amount)}</strong>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="account-order__footer">
+                        <div>
+                          <span>Subtotal</span>
+                          <strong>{formatMoney(order.subtotal)}</strong>
+                        </div>
+                        <div>
+                          <span>Total</span>
+                          <strong>{formatMoney(order.total)}</strong>
+                        </div>
+                        {canTrack && (
+                          <Link to={`/delivery-tracking/${order.id}`} className="account-order__track">
+                            Track my order
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        )}
       </PagePanel>
 
       <PagePanel title="Account details">

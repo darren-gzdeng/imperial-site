@@ -12,6 +12,10 @@ export function updateAccount(payload) {
   });
 }
 
+export function getAccountOrders() {
+  return apiRequest("/account/orders", { auth: true });
+}
+
 export function getAdminUsers() {
   return apiRequest("/admin/users", { auth: true });
 }

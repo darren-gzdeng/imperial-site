@@ -47,6 +47,121 @@
   line-height: 1.6;
 }
 
+.account-orders {
+  display: grid;
+  gap: 14px;
+}
+
+.account-order {
+  overflow: hidden;
+  border: 1px solid #e1e5eb;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.account-order__summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 18px;
+  width: 100%;
+  padding: 18px 20px;
+  border: 0;
+  background: #ffffff;
+  color: #1f2328;
+  cursor: pointer;
+  text-align: left;
+}
+
+.account-order__summary:hover {
+  background: #f8fafc;
+}
+
+.account-order__summary span {
+  display: grid;
+  gap: 4px;
+}
+
+.account-order__summary small,
+.account-order__item small {
+  color: #6b7280;
+  font-size: 0.82rem;
+}
+
+.account-order__details {
+  display: grid;
+  gap: 18px;
+  padding: 0 20px 20px;
+}
+
+.account-order__meta {
+  display: grid;
+  gap: 6px;
+  padding-top: 16px;
+  border-top: 1px solid #edf0f4;
+}
+
+.account-order__meta p {
+  margin: 0;
+  color: #4b5563;
+  line-height: 1.45;
+}
+
+.account-order__items {
+  display: grid;
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
+}
+
+.account-order__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 16px;
+}
+
+.account-order__item + .account-order__item {
+  border-top: 1px solid #edf0f4;
+}
+
+.account-order__item span:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.account-order__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 18px;
+}
+
+.account-order__footer div {
+  display: grid;
+  gap: 4px;
+  min-width: 90px;
+  text-align: right;
+}
+
+.account-order__footer span {
+  color: #6b7280;
+  font-size: 0.86rem;
+}
+
+.account-order__track {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 18px;
+  border-radius: 8px;
+  background: #7faee3;
+  color: #ffffff;
+  font-weight: 700;
+  text-decoration: none;
+}
+
 .account-details-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -201,6 +316,19 @@
 
   .account-details-grid {
     grid-template-columns: 1fr;
+  }
+
+  .account-order__summary,
+  .account-order__item {
+    grid-template-columns: 1fr;
+  }
+
+  .account-order__footer {
+    justify-content: flex-start;
+  }
+
+  .account-order__footer div {
+    text-align: left;
   }
 }
 

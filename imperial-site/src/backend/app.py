@@ -15,6 +15,7 @@ from controllers.products_controller import products_bp
 from core.config import BASE_DIR, CORS_ORIGINS, SECRET_KEY
 from core.database import get_db
 from core.utils import sydney_timestamp, utc_timestamp_to_sydney
+from services.delivery_service import record_delivery_log
 from services.stock_service import ensure_inventory_rows
 
 app = Flask(__name__)
@@ -222,8 +223,102 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_delivery_tracking_order_id ON delivery_tracking(order_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_delivery_logs_order_id_id ON delivery_logs(order_id, id DESC)")
 
+    seed_james_test_order(cursor)
+
     conn.commit()
     conn.close()
+
+
+def seed_james_test_order(cursor):
+    cursor.execute("""
+        SELECT id
+        FROM users
+        WHERE LOWER(email)=LOWER(?)
+    """, ("james.inbox.inbox@gmail.com",))
+    user = cursor.fetchone()
+    if not user:
+        return
+
+    user_id = user[0]
+    reservation_token = "seed-james-he-test-order"
+    cursor.execute("SELECT id FROM orders WHERE reservation_token=?", (reservation_token,))
+    if cursor.fetchone():
+        return
+
+    cursor.execute("""
+        INSERT INTO products (item, sku, weight, unit_price, retail_price, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(sku) DO UPDATE SET
+            item=excluded.item,
+            weight=excluded.weight,
+            unit_price=excluded.unit_price,
+            retail_price=excluded.retail_price,
+            updated_at=excluded.updated_at
+    """, (
+        "Raw Snow Crab Claws 400g/pkg",
+        "SNOW-CLAW-RAW-400",
+        400,
+        28.38,
+        36.90,
+        sydney_timestamp(),
+    ))
+    cursor.execute("SELECT id FROM products WHERE sku=?", ("SNOW-CLAW-RAW-400",))
+    product_id = cursor.fetchone()[0]
+
+    cursor.execute("""
+        INSERT INTO inventory (product_id, stock_quantity)
+        VALUES (?, 20)
+        ON CONFLICT(product_id) DO NOTHING
+    """, (product_id,))
+
+    quantity = 2
+    subtotal = 73.80
+    shipping = 6.50
+    total = 80.30
+    gst = round(total / 11, 2)
+    shipping_address = "4 Gatwood Close, Padstow NSW 2211, Australia"
+
+    cursor.execute("""
+        INSERT INTO orders (
+            user_id, reservation_token, status, subtotal, gst, total,
+            customer_name, phone, shipping_address, delivery_note
+        )
+        VALUES (?, ?, 'out_for_delivery', ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        user_id,
+        reservation_token,
+        subtotal,
+        gst,
+        total,
+        "James He",
+        "424855889",
+        shipping_address,
+        "",
+    ))
+    order_id = cursor.lastrowid
+
+    cursor.execute("""
+        INSERT INTO orders_items (order_id, quantity, product_id)
+        VALUES (?, ?, ?)
+    """, (order_id, quantity, product_id))
+    cursor.execute("""
+        INSERT INTO delivery_tracking (
+            order_id, driver_name, driver_lat, driver_lng, destination_address,
+            status, eta_text, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, 'out_for_delivery', ?, ?)
+    """, (
+        order_id,
+        "Test Driver",
+        -33.8688,
+        151.2093,
+        shipping_address,
+        "25 mins",
+        sydney_timestamp(),
+    ))
+    record_delivery_log(cursor, order_id, "order_placed", "Test order placed for James He.", created_by=user_id)
+    record_delivery_log(cursor, order_id, "assigned_to_driver", "Test order assigned to Test Driver.", created_by=user_id)
+    record_delivery_log(cursor, order_id, "out_for_delivery", "Driver started delivery.", created_by=user_id)
 
 init_db()
 

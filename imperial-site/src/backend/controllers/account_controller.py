@@ -78,3 +78,84 @@ def update_account(user):
         conn.close()
 
 
+@account_bp.route('/account/orders', methods=['GET'])
+@token_required
+def get_account_orders(user):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            SELECT
+                orders.id,
+                orders.status,
+                orders.subtotal,
+                orders.gst,
+                orders.total,
+                orders.customer_name,
+                orders.phone,
+                orders.shipping_address,
+                orders.created_at,
+                delivery_tracking.status,
+                delivery_tracking.driver_name,
+                delivery_tracking.eta_text,
+                delivery_tracking.updated_at
+            FROM orders
+            LEFT JOIN delivery_tracking ON delivery_tracking.order_id = orders.id
+            WHERE orders.user_id=?
+            ORDER BY orders.created_at DESC, orders.id DESC
+        """, (user["user_id"],))
+        order_rows = cursor.fetchall()
+
+        orders = []
+        for row in order_rows:
+            order_id = row[0]
+            cursor.execute("""
+                SELECT
+                    orders_items.id,
+                    orders_items.quantity,
+                    products.id,
+                    products.item,
+                    products.sku,
+                    products.weight,
+                    products.retail_price
+                FROM orders_items
+                JOIN products ON products.id = orders_items.product_id
+                WHERE orders_items.order_id=?
+                ORDER BY orders_items.id
+            """, (order_id,))
+            items = [
+                {
+                    "id": item[0],
+                    "quantity": item[1],
+                    "product_id": item[2],
+                    "item": item[3],
+                    "sku": item[4],
+                    "weight": item[5],
+                    "unit_price": item[6],
+                    "amount": round(float(item[1]) * float(item[6] or 0), 2),
+                }
+                for item in cursor.fetchall()
+            ]
+
+            orders.append({
+                "id": order_id,
+                "status": row[1],
+                "subtotal": row[2],
+                "gst": row[3],
+                "total": row[4],
+                "customer_name": row[5],
+                "phone": row[6],
+                "shipping_address": row[7],
+                "created_at": row[8],
+                "tracking_status": row[9],
+                "driver_name": row[10],
+                "eta_text": row[11],
+                "tracking_updated_at": row[12],
+                "items": items,
+            })
+
+        return jsonify(orders)
+    finally:
+        conn.close()
+
