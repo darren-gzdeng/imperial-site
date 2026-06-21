@@ -7,9 +7,10 @@ export function reserveCheckoutStock(items) {
   });
 }
 
-export function completeCheckoutReservation(reservationToken) {
+export function completeCheckoutReservation(reservationToken, checkoutDetails = {}) {
   return apiRequest(`/checkout/reservations/${reservationToken}/complete`, {
     method: "POST",
+    body: { checkout_details: checkoutDetails },
   });
 }
 

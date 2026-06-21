@@ -8,6 +8,7 @@ from controllers.auth_controller import auth_bp
 from controllers.checkout_controller import checkout_bp
 from controllers.clients_controller import clients_bp
 from controllers.dashboard_controller import dashboard_bp
+from controllers.delivery_controller import delivery_bp
 from controllers.inventory_controller import inventory_bp
 from controllers.invoices_controller import invoices_bp
 from controllers.products_controller import products_bp
@@ -25,6 +26,7 @@ app.register_blueprint(auth_bp)
 app.register_blueprint(checkout_bp)
 app.register_blueprint(clients_bp)
 app.register_blueprint(dashboard_bp)
+app.register_blueprint(delivery_bp)
 app.register_blueprint(inventory_bp)
 app.register_blueprint(invoices_bp)
 app.register_blueprint(products_bp)
@@ -63,6 +65,18 @@ def init_db():
     if "created_at" not in user_columns:
         cursor.execute("ALTER TABLE users ADD COLUMN created_at TIMESTAMP")
         cursor.execute("UPDATE users SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
+
+    cursor.execute("PRAGMA table_info(orders)")
+    order_columns = {column[1] for column in cursor.fetchall()}
+    order_migrations = {
+        "reservation_token": "ALTER TABLE orders ADD COLUMN reservation_token TEXT",
+        "customer_name": "ALTER TABLE orders ADD COLUMN customer_name TEXT",
+        "phone": "ALTER TABLE orders ADD COLUMN phone TEXT",
+        "delivery_note": "ALTER TABLE orders ADD COLUMN delivery_note TEXT",
+    }
+    for column_name, statement in order_migrations.items():
+        if order_columns and column_name not in order_columns:
+            cursor.execute(statement)
 
     cursor.execute("PRAGMA table_info(products)")
     product_columns = {column[1] for column in cursor.fetchall()}
@@ -204,6 +218,9 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_invoices_created_at ON invoices(created_at DESC)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_item ON products(item)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_clients_client_name ON clients(client_name)")
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_reservation_token ON orders(reservation_token)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_delivery_tracking_order_id ON delivery_tracking(order_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_delivery_logs_order_id_id ON delivery_logs(order_id, id DESC)")
 
     conn.commit()
     conn.close()

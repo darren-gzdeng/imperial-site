@@ -7,6 +7,7 @@ import {
   updateClient as updateClientApi,
 } from "../api/clientsApi";
 import { clearAuthToken, getAuthToken } from "../api/client";
+import { getDeliveryChecks } from "../api/deliveryApi";
 import {
   addStock as addStockApi,
   getInventory,
@@ -170,6 +171,8 @@ export default function Invoice() {
   const [stockHistoryItem, setStockHistoryItem] = useState("");
   const [selectedHistoryProductId, setSelectedHistoryProductId] = useState("");
   const [stockMessage, setStockMessage] = useState("");
+  const [deliveryChecks, setDeliveryChecks] = useState([]);
+  const [deliveryMessage, setDeliveryMessage] = useState("");
   const [clients, setClients] = useState([]);
   const [newClient, setNewClient] = useState({ client_name: "" });
   const [clientMessage, setClientMessage] = useState("");
@@ -225,6 +228,15 @@ export default function Invoice() {
       setStockMessage("");
     } catch (err) {
       setStockMessage("Failed to load stock: " + err.message);
+    }
+  };
+
+  const loadDeliveryChecks = async () => {
+    try {
+      setDeliveryChecks(await getDeliveryChecks());
+      setDeliveryMessage("");
+    } catch (err) {
+      setDeliveryMessage("Failed to load delivery checks: " + err.message);
     }
   };
 
@@ -731,6 +743,8 @@ export default function Invoice() {
 
     if (view === "stock") {
       loadStock();
+    } else if (view === "delivery") {
+      loadDeliveryChecks();
     }
   };
 
@@ -900,6 +914,9 @@ export default function Invoice() {
                   </ActionButton>
                   <ActionButton variant="success" onClick={() => openInvoiceView("stock")}>
                     Stock Check
+                  </ActionButton>
+                  <ActionButton variant="secondary" onClick={() => openInvoiceView("delivery")}>
+                    Delivery Check
                   </ActionButton>
                 </>
               )}
@@ -1127,6 +1144,61 @@ export default function Invoice() {
                   </ActionButton>
                 </div>
               )}
+            </div>
+          )}
+        </PagePanel>
+      )}
+
+      {isAdmin && activeView === "delivery" && (
+        <PagePanel title="Delivery Check">
+          {deliveryMessage && <p className="status-message">{deliveryMessage}</p>}
+
+          {deliveryChecks.length === 0 ? (
+            <p>No delivery orders yet.</p>
+          ) : (
+            <div className="delivery-check-list">
+              {deliveryChecks.map((delivery) => (
+                <section key={delivery.order_id} className="delivery-check-card">
+                  <div className="delivery-check-card__header">
+                    <div>
+                      <h4>Order #{delivery.order_id}</h4>
+                      <p>{delivery.customer_name || "Customer"} · {delivery.phone || "No phone"}</p>
+                    </div>
+                    <span>{delivery.status.replaceAll("_", " ")}</span>
+                  </div>
+                  <div className="delivery-check-card__meta">
+                    <p><strong>Driver:</strong> {delivery.driver_name || "Not assigned"}</p>
+                    <p><strong>Address:</strong> {delivery.destination_address}</p>
+                    <p><strong>Total:</strong> ${Number(delivery.order_total || 0).toFixed(2)}</p>
+                    <p><strong>Last update:</strong> {delivery.updated_at || "-"}</p>
+                  </div>
+
+                  {delivery.logs?.length ? (
+                    <table className="data-table delivery-log-table">
+                      <thead>
+                        <tr>
+                          <th>Time</th>
+                          <th>Event</th>
+                          <th>Log</th>
+                          <th>By</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {delivery.logs.map((log) => (
+                          <tr key={log.id}>
+                            <td>{log.created_at}</td>
+                            <td>{log.event_type.replaceAll("_", " ")}</td>
+                            <td>{log.message}</td>
+                            <td>{log.created_by || "-"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p>No delivery log yet.</p>
+                  )}
+                </section>
+              ))}
             </div>
           )}
         </PagePanel>

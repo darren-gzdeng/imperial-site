@@ -15,6 +15,8 @@ import Account from "./pages/Account";
 import Cart from "./pages/Cart";
 import Checkout from "./pages/Checkout";
 import CheckoutSuccess from "./pages/CheckoutSuccess";
+import DeliveryTracking from "./pages/DeliveryTracking";
+import DriverDeliveries from "./pages/DriverDeliveries";
 import Invoice from "./pages/Invoice";
 import ChefRecipe from "./pages/ChefRecipe";
 import RecipeDetail from "./pages/RecipeDetail";
@@ -40,6 +42,8 @@ export default function App() {
         <Route path="account" element={<Account />} />
         <Route path="cart" element={<Cart />} />
         <Route path="invoice" element={<Invoice />} />
+        <Route path="driver-deliveries" element={<DriverDeliveries />} />
+        <Route path="delivery-tracking/:orderId" element={<DeliveryTracking />} />
         <Route path="chef-recipe" element={<ChefRecipe />} />
         <Route path="chef-recipe/:slug" element={<RecipeDetail />} />
         <Route path="shipping-delivery" element={<ShippingDelivery />} />

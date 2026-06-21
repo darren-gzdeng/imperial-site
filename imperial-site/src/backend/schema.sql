@@ -77,11 +77,15 @@ CREATE TABLE IF NOT EXISTS stock_reservation_items (
 CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
+    reservation_token TEXT UNIQUE,
     status TEXT NOT NULL DEFAULT 'pending',
     subtotal REAL NOT NULL,
     gst REAL NOT NULL,
     total REAL NOT NULL,
+    customer_name TEXT,
+    phone TEXT,
     shipping_address TEXT NOT NULL,
+    delivery_note TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
@@ -93,6 +97,30 @@ CREATE TABLE IF NOT EXISTS orders_items (
     product_id INTEGER NOT NULL,
     FOREIGN KEY (order_id) REFERENCES orders(id),
     FOREIGN KEY (product_id) REFERENCES products(id)
+);
+
+CREATE TABLE IF NOT EXISTS delivery_tracking (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL UNIQUE,
+    driver_name TEXT,
+    driver_lat REAL,
+    driver_lng REAL,
+    destination_address TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'preparing',
+    eta_text TEXT,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (order_id) REFERENCES orders(id)
+);
+
+CREATE TABLE IF NOT EXISTS delivery_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    message TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    created_by INTEGER,
+    FOREIGN KEY (order_id) REFERENCES orders(id),
+    FOREIGN KEY (created_by) REFERENCES users(id)
 );
 
 CREATE TABLE IF NOT EXISTS invoices (

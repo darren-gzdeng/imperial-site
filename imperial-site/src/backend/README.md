@@ -29,3 +29,13 @@ controllers/products_controller.py
 services/stock_service.py
 core/database.py
 ```
+
+## Delivery Tracking
+
+Delivery tracking uses:
+
+- `controllers/delivery_controller.py` for tracking APIs.
+- `orders` and `delivery_tracking` database tables.
+- `VITE_GOOGLE_MAPS_API_KEY` in the frontend `.env.local` file for Google Maps JavaScript rendering.
+
+Drivers update their current GPS position through `/driver-deliveries`; customers view the route and ETA at `/delivery-tracking/:orderId`.

@@ -521,11 +521,62 @@
   margin-left: 8px;
 }
 
+.delivery-check-list {
+  display: grid;
+  gap: 18px;
+}
+
+.delivery-check-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid #d7dbe2;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.delivery-check-card__header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.delivery-check-card__header h4,
+.delivery-check-card__header p,
+.delivery-check-card__meta p {
+  margin: 0;
+}
+
+.delivery-check-card__header span {
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.delivery-check-card__meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 18px;
+  color: #475569;
+}
+
+.delivery-log-table th,
+.delivery-log-table td {
+  padding: 9px;
+  vertical-align: top;
+}
+
 @media (max-width: 800px) {
   .form-grid--two,
   .invoice-item-grid,
   .product-edit-grid,
-  .invoice-filter-bar {
+  .invoice-filter-bar,
+  .delivery-check-card__meta {
     grid-template-columns: 1fr;
   }
 }

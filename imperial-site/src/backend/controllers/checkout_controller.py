@@ -10,7 +10,8 @@ except ImportError:
 
 from core.config import FRONTEND_BASE_URL, STRIPE_CURRENCY
 from core.database import get_db
-from core.utils import calculate_shipping, normalize_quantity, price_to_cents, utc_iso_timestamp
+from core.utils import calculate_shipping, normalize_quantity, price_to_cents, sydney_timestamp, utc_iso_timestamp
+from services.delivery_service import record_delivery_log
 from services.stock_service import (
     ensure_inventory_rows,
     record_stock_history,
@@ -118,6 +119,16 @@ def reserve_checkout_stock():
 
 @checkout_bp.route('/checkout/reservations/<reservation_token>/complete', methods=['POST'])
 def complete_checkout_reservation(reservation_token):
+    data = request.json or {}
+    checkout_details = data.get("checkout_details") or {}
+    shipping_address = (checkout_details.get("shipping_address") or "").strip()
+    customer_name = (checkout_details.get("customer_name") or "").strip()
+    phone = (checkout_details.get("phone") or "").strip()
+    delivery_note = (checkout_details.get("delivery_note") or "").strip()
+
+    if not shipping_address:
+        return jsonify({"error": "Shipping address is required to create the delivery order"}), 400
+
     conn = get_db()
     cursor = conn.cursor()
 
@@ -136,16 +147,86 @@ def complete_checkout_reservation(reservation_token):
 
         reservation_id, status = reservation
 
+        cursor.execute("SELECT id FROM orders WHERE reservation_token=?", (reservation_token,))
+        existing_order = cursor.fetchone()
+        if existing_order:
+            conn.commit()
+            return jsonify({"message": "Checkout completed", "order_id": existing_order[0]})
+
         if status != "active":
             conn.rollback()
             return jsonify({"error": "Reservation is no longer active"}), 409
+
+        cursor.execute("""
+            SELECT products.id, products.retail_price, stock_reservation_items.quantity
+            FROM stock_reservation_items
+            JOIN products ON products.id = stock_reservation_items.product_id
+            WHERE stock_reservation_items.reservation_id=?
+        """, (reservation_id,))
+        reserved_items = cursor.fetchall()
+
+        if not reserved_items:
+            conn.rollback()
+            return jsonify({"error": "Reservation has no items"}), 400
+
+        cursor.execute("SELECT id FROM users ORDER BY id LIMIT 1")
+        fallback_user = cursor.fetchone()
+        user_id = checkout_details.get("user_id") or (fallback_user[0] if fallback_user else None)
+
+        if not user_id:
+            conn.rollback()
+            return jsonify({"error": "A user account is required to create an order"}), 400
+
+        subtotal = sum(float(retail_price) * float(quantity) for _, retail_price, quantity in reserved_items)
+        shipping = calculate_shipping(subtotal)
+        total = round(subtotal + shipping, 2)
+        gst = round(total / 11, 2)
+
+        cursor.execute("""
+            INSERT INTO orders (
+                user_id, reservation_token, status, subtotal, gst, total,
+                customer_name, phone, shipping_address, delivery_note
+            )
+            VALUES (?, ?, 'paid', ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            user_id,
+            reservation_token,
+            round(subtotal, 2),
+            gst,
+            total,
+            customer_name,
+            phone,
+            shipping_address,
+            delivery_note,
+        ))
+        order_id = cursor.lastrowid
+
+        for product_id, _, quantity in reserved_items:
+            cursor.execute("""
+                INSERT INTO orders_items (order_id, quantity, product_id)
+                VALUES (?, ?, ?)
+            """, (order_id, int(quantity), product_id))
+
+        cursor.execute("""
+            INSERT INTO delivery_tracking (
+                order_id, destination_address, status, updated_at
+            )
+            VALUES (?, ?, 'preparing', ?)
+        """, (order_id, shipping_address, sydney_timestamp()))
+        record_delivery_log(
+            cursor,
+            order_id,
+            "order_placed",
+            f"Order placed for delivery to {shipping_address}.",
+            created_by=user_id,
+        )
 
         cursor.execute(
             "UPDATE stock_reservations SET status='completed' WHERE id=?",
             (reservation_id,)
         )
         conn.commit()
-        return jsonify({"message": "Checkout completed"})
+        return jsonify({"message": "Checkout completed", "order_id": order_id})
     finally:
         conn.close()
 
@@ -243,5 +324,3 @@ def create_stripe_checkout_session():
         return jsonify({"error": str(e)}), 502
     finally:
         conn.close()
-
-
