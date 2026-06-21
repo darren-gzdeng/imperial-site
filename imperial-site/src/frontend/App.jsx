@@ -1,4 +1,5 @@
 import { Routes, Route } from "react-router";
+import TranslationManager from "./i18n/TranslationManager";
 import MainLayout from "./layouts/MainLayout";
 
 import Home from "./pages/Home";
@@ -26,32 +27,35 @@ import TermsOfService from "./pages/TermsOfService";
 
 export default function App() {
   return (
-    <Routes>
-      {/* Main layout pages */}
-      <Route element={<MainLayout />}>
-        <Route index element={<Home />} />
-        <Route path="about" element={<About />} />
-        <Route path="contact" element={<Contact />} />
-        <Route path="products" element={<Products />} />
-        <Route path="new-arrivals" element={<NewArrivals />} />
-        <Route path="seafood" element={<Seafood />} />
-        <Route path="hotpot" element={<Hotpot />} />
-        <Route path="login" element={<Login />} />
-        <Route path="register" element={<Register />} />
-        <Route path="forgot-password" element={<ForgotPassword />} />
-        <Route path="account" element={<Account />} />
-        <Route path="cart" element={<Cart />} />
-        <Route path="invoice" element={<Invoice />} />
-        <Route path="driver-deliveries" element={<DriverDeliveries />} />
-        <Route path="delivery-tracking/:orderId" element={<DeliveryTracking />} />
-        <Route path="chef-recipe" element={<ChefRecipe />} />
-        <Route path="chef-recipe/:slug" element={<RecipeDetail />} />
-        <Route path="shipping-delivery" element={<ShippingDelivery />} />
-        <Route path="privacy-policy" element={<PrivacyPolicy />} />
-        <Route path="terms-of-service" element={<TermsOfService />} />
-      </Route>
-      <Route path="checkout" element={<Checkout />} />
-      <Route path="checkout/success" element={<CheckoutSuccess />} />
-    </Routes>
+    <>
+      <TranslationManager />
+      <Routes>
+        {/* Main layout pages */}
+        <Route element={<MainLayout />}>
+          <Route index element={<Home />} />
+          <Route path="about" element={<About />} />
+          <Route path="contact" element={<Contact />} />
+          <Route path="products" element={<Products />} />
+          <Route path="new-arrivals" element={<NewArrivals />} />
+          <Route path="seafood" element={<Seafood />} />
+          <Route path="hotpot" element={<Hotpot />} />
+          <Route path="login" element={<Login />} />
+          <Route path="register" element={<Register />} />
+          <Route path="forgot-password" element={<ForgotPassword />} />
+          <Route path="account" element={<Account />} />
+          <Route path="cart" element={<Cart />} />
+          <Route path="invoice" element={<Invoice />} />
+          <Route path="driver-deliveries" element={<DriverDeliveries />} />
+          <Route path="delivery-tracking/:orderId" element={<DeliveryTracking />} />
+          <Route path="chef-recipe" element={<ChefRecipe />} />
+          <Route path="chef-recipe/:slug" element={<RecipeDetail />} />
+          <Route path="shipping-delivery" element={<ShippingDelivery />} />
+          <Route path="privacy-policy" element={<PrivacyPolicy />} />
+          <Route path="terms-of-service" element={<TermsOfService />} />
+        </Route>
+        <Route path="checkout" element={<Checkout />} />
+        <Route path="checkout/success" element={<CheckoutSuccess />} />
+      </Routes>
+    </>
   );
 }
