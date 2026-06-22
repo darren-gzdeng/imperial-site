@@ -534,10 +534,10 @@ export default function Invoice() {
 
   const updateStockState = (productId, stockQuantity) => {
     setStockRows((prev) =>
-      prev.map((row) => (row.product_id === productId ? { ...row, stock_quantity: stockQuantity } : row))
+      prev.map((row) => (String(row.product_id) === String(productId) ? { ...row, stock_quantity: stockQuantity } : row))
     );
     setProducts((prev) =>
-      prev.map((product) => (product.id === productId ? { ...product, stock_quantity: stockQuantity } : product))
+      prev.map((product) => (String(product.id) === String(productId) ? { ...product, stock_quantity: stockQuantity } : product))
     );
     setStockInputs((prev) => ({ ...prev, [productId]: "" }));
     setStockComments((prev) => ({ ...prev, [productId]: "" }));

@@ -73,6 +73,7 @@ def init_db():
         "reservation_token": "ALTER TABLE orders ADD COLUMN reservation_token TEXT",
         "customer_name": "ALTER TABLE orders ADD COLUMN customer_name TEXT",
         "phone": "ALTER TABLE orders ADD COLUMN phone TEXT",
+        "delivery_date": "ALTER TABLE orders ADD COLUMN delivery_date TEXT",
         "delivery_note": "ALTER TABLE orders ADD COLUMN delivery_note TEXT",
     }
     for column_name, statement in order_migrations.items():
@@ -281,9 +282,9 @@ def seed_james_test_order(cursor):
     cursor.execute("""
         INSERT INTO orders (
             user_id, reservation_token, status, subtotal, gst, total,
-            customer_name, phone, shipping_address, delivery_note
+            customer_name, phone, shipping_address, delivery_date, delivery_note
         )
-        VALUES (?, ?, 'out_for_delivery', ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, 'out_for_delivery', ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         user_id,
         reservation_token,
@@ -293,6 +294,7 @@ def seed_james_test_order(cursor):
         "James He",
         "424855889",
         shipping_address,
+        "2026-06-24",
         "",
     ))
     order_id = cursor.lastrowid

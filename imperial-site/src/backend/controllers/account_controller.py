@@ -95,6 +95,7 @@ def get_account_orders(user):
                 orders.customer_name,
                 orders.phone,
                 orders.shipping_address,
+                orders.delivery_date,
                 orders.created_at,
                 delivery_tracking.status,
                 delivery_tracking.driver_name,
@@ -147,15 +148,15 @@ def get_account_orders(user):
                 "customer_name": row[5],
                 "phone": row[6],
                 "shipping_address": row[7],
-                "created_at": row[8],
-                "tracking_status": row[9],
-                "driver_name": row[10],
-                "eta_text": row[11],
-                "tracking_updated_at": row[12],
+                "delivery_date": row[8],
+                "created_at": row[9],
+                "tracking_status": row[10],
+                "driver_name": row[11],
+                "eta_text": row[12],
+                "tracking_updated_at": row[13],
                 "items": items,
             })
 
         return jsonify(orders)
     finally:
         conn.close()
-

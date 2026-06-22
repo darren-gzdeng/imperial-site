@@ -317,6 +317,7 @@ export default function Account() {
                     <div className="account-order__details">
                       <div className="account-order__meta">
                         <p><strong>Delivery address:</strong> {order.shipping_address}</p>
+                        <p><strong>Delivery date:</strong> {order.delivery_date || "Not selected"}</p>
                         <p><strong>Driver:</strong> {order.driver_name || "Not assigned yet"}</p>
                         <p><strong>ETA:</strong> {order.eta_text || "Waiting for driver location"}</p>
                       </div>

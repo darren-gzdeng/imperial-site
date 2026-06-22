@@ -1,7 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { CalendarDays, Trash2 } from "lucide-react";
-import { getCartItems, removeCartItem, updateCartItemQuantity } from "../api/cartStorage";
+import {
+  formatDeliveryDate,
+  getCartItems,
+  getDefaultDeliveryDate,
+  getDeliveryDate,
+  removeCartItem,
+  saveDeliveryDate,
+  updateCartItemQuantity,
+} from "../api/cartStorage";
 import { getAuthToken } from "../api/client";
 
 const parsePrice = (value) => {
@@ -10,19 +18,6 @@ const parsePrice = (value) => {
 };
 
 const formatPrice = (value) => `$${value.toFixed(2)}`;
-
-const getDeliveryDate = () => {
-  const date = new Date();
-  const friday = 5;
-  const daysUntilFriday = (friday - date.getDay() + 7) % 7 || 7;
-  date.setDate(date.getDate() + daysUntilFriday);
-
-  return date.toLocaleDateString("en-AU", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-};
 
 const getShipping = (subtotal) => {
   if (subtotal >= 85) {
@@ -36,9 +31,51 @@ const getShipping = (subtotal) => {
   return 15;
 };
 
+const monthLabelFormatter = new Intl.DateTimeFormat("en-AU", { month: "long" });
+const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+const toDateKey = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const dateFromKey = (dateKey) => {
+  const [year, month, day] = String(dateKey).split("-").map(Number);
+  return new Date(year, month - 1, day);
+};
+
+const buildCalendarDays = (monthDate) => {
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const firstGridDay = new Date(firstDay);
+  firstGridDay.setDate(firstDay.getDate() - ((firstDay.getDay() + 6) % 7));
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(firstGridDay);
+    date.setDate(firstGridDay.getDate() + index);
+    return date;
+  });
+};
+
+const isDeliveryDateDisabled = (date) => {
+  const earliest = dateFromKey(getDefaultDeliveryDate());
+  earliest.setHours(0, 0, 0, 0);
+
+  const candidate = new Date(date);
+  candidate.setHours(0, 0, 0, 0);
+
+  return candidate < earliest || candidate.getDay() === 0;
+};
+
 export default function Cart() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [cartItems, setCartItems] = useState([]);
+  const [deliveryDate, setDeliveryDate] = useState(getDeliveryDate);
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(() => dateFromKey(getDeliveryDate()));
 
   useEffect(() => {
     setIsLoggedIn(!!getAuthToken());
@@ -59,6 +96,22 @@ export default function Cart() {
   const creditCovered = 0;
   const creditBalance = 0;
   const total = subtotal + shipping - creditCovered;
+  const calendarDays = buildCalendarDays(calendarMonth);
+
+  const changeCalendarMonth = (direction) => {
+    setCalendarMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + direction, 1));
+  };
+
+  const selectDeliveryDate = (date) => {
+    if (isDeliveryDateDisabled(date)) {
+      return;
+    }
+
+    const dateKey = toDateKey(date);
+    setDeliveryDate(dateKey);
+    saveDeliveryDate(dateKey);
+    setIsCalendarOpen(false);
+  };
 
   return (
     <div className="cart-page">
@@ -114,10 +167,62 @@ export default function Cart() {
           </div>
 
           <section className="cart-checkout-panel" aria-label="Checkout summary">
-            <div className="cart-delivery-date">
+            <button
+              type="button"
+              className="cart-delivery-date"
+              onClick={() => setIsCalendarOpen((prev) => !prev)}
+            >
               <CalendarDays size={24} strokeWidth={1.8} />
-              <span>Delivery date: {getDeliveryDate()}</span>
-            </div>
+              <span>Delivery date: {formatDeliveryDate(deliveryDate)}</span>
+            </button>
+
+            {isCalendarOpen && (
+              <div className="cart-calendar" role="dialog" aria-label="Select delivery date">
+                <p className="cart-calendar__cutoff">Selected-day delivery cut off time: 5:30pm</p>
+                <div className="cart-calendar__month">
+                  <button type="button" aria-label="Previous month" onClick={() => changeCalendarMonth(-1)}>
+                    &lt;
+                  </button>
+                  <h3>
+                    {monthLabelFormatter.format(calendarMonth)}
+                    <span>{calendarMonth.getFullYear()}</span>
+                  </h3>
+                  <button type="button" aria-label="Next month" onClick={() => changeCalendarMonth(1)}>
+                    &gt;
+                  </button>
+                </div>
+                <div className="cart-calendar__weekdays">
+                  {weekdays.map((day) => <span key={day}>{day}</span>)}
+                </div>
+                <div className="cart-calendar__grid">
+                  {calendarDays.map((date) => {
+                    const dateKey = toDateKey(date);
+                    const isSelected = dateKey === deliveryDate;
+                    const isCurrentMonth = date.getMonth() === calendarMonth.getMonth();
+                    const isDisabled = isDeliveryDateDisabled(date);
+
+                    return (
+                      <button
+                        key={dateKey}
+                        type="button"
+                        className={[
+                          "cart-calendar__day",
+                          isSelected ? "cart-calendar__day--selected" : "",
+                          !isCurrentMonth ? "cart-calendar__day--muted" : "",
+                        ].filter(Boolean).join(" ")}
+                        disabled={isDisabled}
+                        onClick={() => selectDeliveryDate(date)}
+                      >
+                        {date.getDate()}
+                      </button>
+                    );
+                  })}
+                </div>
+                <button type="button" className="cart-calendar__close" onClick={() => setIsCalendarOpen(false)}>
+                  x Close
+                </button>
+              </div>
+            )}
 
             <input className="cart-note-input" placeholder="Leave a note" />
 

@@ -130,13 +130,38 @@ const parsePrice = (value) => {
   return Number.isFinite(price) ? price : 0;
 };
 
+const normalizeProductKey = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/\s*\/\s*/g, "/");
+
+const stripPackageText = (value) =>
+  normalizeProductKey(value)
+    .replace(/\s+\d+(?:\.\d+)?\s*(?:g|kg)\/pkg$/, "")
+    .trim();
+
 const mergeBackendPrices = (backendProducts) => {
   const productsByItem = new Map(
-    backendProducts.map((product) => [String(product.item || "").trim().toLowerCase(), product])
+    backendProducts.map((product) => [normalizeProductKey(product.item), product])
+  );
+  const productsByBaseItem = new Map(
+    backendProducts.map((product) => [stripPackageText(product.item), product])
+  );
+  const productsBySku = new Map(
+    backendProducts
+      .filter((product) => product.sku)
+      .map((product) => [normalizeProductKey(product.sku), product])
   );
 
   return catalogProducts.map((product) => {
-    const backendProduct = productsByItem.get(product.backendItem.toLowerCase());
+    const backendProduct =
+      productsBySku.get(normalizeProductKey(product.sku)) ||
+      productsByItem.get(normalizeProductKey(product.backendItem)) ||
+      productsByItem.get(normalizeProductKey(`${product.name} ${product.weight}`)) ||
+      productsByBaseItem.get(stripPackageText(product.backendItem)) ||
+      productsByBaseItem.get(stripPackageText(product.name));
 
     if (!backendProduct) {
       return product;
@@ -258,7 +283,8 @@ export default function Products() {
   };
 
   const handleAddToCart = (product) => {
-    if (Number(product.stock_quantity || 0) <= 0) {
+    const hasKnownStock = product.stock_quantity !== undefined && product.stock_quantity !== null;
+    if (hasKnownStock && Number(product.stock_quantity) <= 0) {
       return;
     }
 
@@ -352,7 +378,8 @@ export default function Products() {
         ) : (
           <div className="product-grid">
             {filteredProducts.map((product) => {
-              const isOutOfStock = Number(product.stock_quantity || 0) <= 0;
+              const hasKnownStock = product.stock_quantity !== undefined && product.stock_quantity !== null;
+              const isOutOfStock = hasKnownStock && Number(product.stock_quantity) <= 0;
 
               return (
                 <article key={product.id} className="product-card">

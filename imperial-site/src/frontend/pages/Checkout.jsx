@@ -4,7 +4,7 @@ import { Search, HelpCircle, Image as ImageIcon } from "lucide-react";
 import { getAccount } from "../api/accountApi";
 import { createStripeCheckoutSession, reserveCheckoutStock } from "../api/checkoutApi";
 import { getAuthToken } from "../api/client";
-import { clearCartItems, getCartItems } from "../api/cartStorage";
+import { clearCartItems, formatDeliveryDate, getCartItems, getDeliveryDate } from "../api/cartStorage";
 import { loadGoogleMaps } from "../components/maps/googleMapsLoader";
 
 const parsePrice = (value) => {
@@ -262,6 +262,7 @@ export default function Checkout() {
         customer_name: `${checkoutDetails.first_name} ${checkoutDetails.last_name}`.trim(),
         phone: checkoutDetails.phone,
         shipping_address: fullAddress,
+        delivery_date: getDeliveryDate(),
       })
     );
 
@@ -292,6 +293,7 @@ export default function Checkout() {
   const shipping = getShipping(subtotal);
   const total = subtotal + shipping;
   const itemCount = cartItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  const deliveryDate = getDeliveryDate();
   const initials = account?.first_name?.[0] || account?.email?.[0] || "G";
   const updateCheckoutField = (field, value) => {
     setCheckoutDetails((prev) => ({ ...prev, [field]: value }));
@@ -393,23 +395,31 @@ export default function Checkout() {
           </div>
 
           <div className="checkout-totals">
+            <div>
+              <span>Delivery date</span>
+              <strong data-no-translate>{formatDeliveryDate(deliveryDate)}</strong>
+            </div>
             {reservationToken && reservationSecondsRemaining > 0 && (
               <div className="checkout-reservation-timer">
                 <span>Your orders expire in</span>
-                <strong>{formatReservationTime(reservationSecondsRemaining)}</strong>
+                <strong data-no-translate>{formatReservationTime(reservationSecondsRemaining)}</strong>
               </div>
             )}
             <div>
-              <span>Subtotal · {itemCount} items</span>
-              <strong>{formatPrice(subtotal)}</strong>
+              <span>
+                <span>Subtotal</span>
+                {" · "}
+                <span data-no-translate>{itemCount} items</span>
+              </span>
+              <strong data-no-translate>{formatPrice(subtotal)}</strong>
             </div>
             <div>
               <span>Shipping policy <HelpCircle size={14} strokeWidth={1.8} /></span>
-              <strong>{shipping === 0 ? "Free" : formatPrice(shipping)}</strong>
+              <strong data-no-translate>{shipping === 0 ? "Free" : formatPrice(shipping)}</strong>
             </div>
             <div className="checkout-total-row">
               <span>Total</span>
-              <strong><small>AUD</small> {formatPrice(total)}</strong>
+              <strong data-no-translate><small>AUD</small> {formatPrice(total)}</strong>
             </div>
           </div>
         </aside>

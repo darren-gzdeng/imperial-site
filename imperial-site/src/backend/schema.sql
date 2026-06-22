@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS orders (
     customer_name TEXT,
     phone TEXT,
     shipping_address TEXT NOT NULL,
+    delivery_date TEXT,
     delivery_note TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id)

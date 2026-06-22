@@ -27,8 +27,14 @@ function translateTextNode(node, language) {
     return;
   }
 
-  if (!node.__imperialOriginalText) {
-    node.__imperialOriginalText = node.nodeValue;
+  const currentText = node.nodeValue;
+  const wasChangedByReact =
+    node.__imperialLastTranslatedText &&
+    currentText !== node.__imperialLastTranslatedText &&
+    currentText !== node.__imperialOriginalText;
+
+  if (!node.__imperialOriginalText || wasChangedByReact) {
+    node.__imperialOriginalText = currentText;
   }
 
   const originalText = node.__imperialOriginalText;
@@ -37,6 +43,8 @@ function translateTextNode(node, language) {
   const translated = translateText(originalText.trim(), language);
 
   const nextValue = `${leadingSpace}${translated}${trailingSpace}`;
+  node.__imperialLastTranslatedText = nextValue;
+
   if (node.nodeValue !== nextValue) {
     node.nodeValue = nextValue;
   }
@@ -52,6 +60,11 @@ function applyTranslations(language) {
         if (!parent || ["SCRIPT", "STYLE", "NOSCRIPT"].includes(parent.tagName)) {
           return NodeFilter.FILTER_REJECT;
         }
+
+        if (parent.closest("[data-no-translate]")) {
+          return NodeFilter.FILTER_REJECT;
+        }
+
         return NodeFilter.FILTER_ACCEPT;
       },
     }

@@ -22,6 +22,7 @@ export default function Header() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [cartCount, setCartCount] = useState(0);
   const [language, setLanguage] = useState(getStoredLanguage);
+  const [isHeaderHidden, setIsHeaderHidden] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -48,13 +49,31 @@ export default function Header() {
     };
   }, []);
 
+  useEffect(() => {
+    let lastScrollY = window.scrollY;
+
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      const isScrollingDown = currentScrollY > lastScrollY;
+
+      setIsHeaderHidden(isScrollingDown && currentScrollY > 120);
+      lastScrollY = currentScrollY;
+    };
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+    };
+  }, []);
+
   const accountPath = isLoggedIn ? "/account" : "/login";
   const toggleLanguage = () => {
     setStoredLanguage(language === "zh-CN" ? "en" : "zh-CN");
   };
 
   return (
-    <header className="site-header">
+    <header className={isHeaderHidden ? "site-header site-header--hidden" : "site-header"}>
       <div className="header-inner">
         <div className="header-top">
           <div className="brand-wrap">

@@ -124,6 +124,7 @@ def complete_checkout_reservation(reservation_token):
     shipping_address = (checkout_details.get("shipping_address") or "").strip()
     customer_name = (checkout_details.get("customer_name") or "").strip()
     phone = (checkout_details.get("phone") or "").strip()
+    delivery_date = (checkout_details.get("delivery_date") or "").strip()
     delivery_note = (checkout_details.get("delivery_note") or "").strip()
 
     if not shipping_address:
@@ -185,9 +186,9 @@ def complete_checkout_reservation(reservation_token):
         cursor.execute("""
             INSERT INTO orders (
                 user_id, reservation_token, status, subtotal, gst, total,
-                customer_name, phone, shipping_address, delivery_note
+                customer_name, phone, shipping_address, delivery_date, delivery_note
             )
-            VALUES (?, ?, 'paid', ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, 'paid', ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             user_id,
             reservation_token,
@@ -197,6 +198,7 @@ def complete_checkout_reservation(reservation_token):
             customer_name,
             phone,
             shipping_address,
+            delivery_date,
             delivery_note,
         ))
         order_id = cursor.lastrowid
