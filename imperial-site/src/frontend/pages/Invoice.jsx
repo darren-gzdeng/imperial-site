@@ -26,6 +26,12 @@ import {
   getProducts,
   updateProduct as updateProductApi,
 } from "../api/productsApi";
+import {
+  createPaymentCompany as createPaymentCompanyApi,
+  deletePaymentCompany as deletePaymentCompanyApi,
+  getPaymentCompanies,
+  updatePaymentCompany as updatePaymentCompanyApi,
+} from "../api/paymentCompaniesApi";
 import { PagePanel, PageShell, PageToolbar } from "../components/layout/PageShell";
 import ActionButton from "../components/ui/ActionButton";
 
@@ -110,8 +116,9 @@ const createInitialFormData = (invoices = []) => {
   return {
     invoice_number: generateInvoiceNumber(invoices, today),
     client_name: "",
+    payment_company_id: "",
     issue_date: formatDateInput(today),
-    due_date: formatDateInput(addDays(today, 7)),
+    due_date: formatDateInput(addDays(today, 14)),
     items: [{ product_id: "", description: "", quantity: 1, unit_price: 0, amount: 0 }],
   };
 };
@@ -177,6 +184,19 @@ export default function Invoice() {
   const [newClient, setNewClient] = useState({ client_name: "" });
   const [clientMessage, setClientMessage] = useState("");
   const [selectedClientId, setSelectedClientId] = useState("");
+  const [paymentCompanies, setPaymentCompanies] = useState([]);
+  const [newPaymentCompany, setNewPaymentCompany] = useState({
+    company_name: "",
+    abn: "",
+    address_line_1: "",
+    address_line_2: "",
+    bsb: "",
+    account_name: "",
+    account_number: "",
+    notes: "",
+  });
+  const [paymentCompanyMessage, setPaymentCompanyMessage] = useState("");
+  const [selectedPaymentCompanyId, setSelectedPaymentCompanyId] = useState("");
   const [activeView, setActiveView] = useState("menu");
   const [formData, setFormData] = useState(createInitialFormData());
   const [userId, setUserId] = useState(null);
@@ -219,6 +239,18 @@ export default function Invoice() {
       setClients(await getClients());
     } catch (err) {
       setClientMessage("Failed to load clients: " + err.message);
+    }
+  };
+
+  const loadPaymentCompanies = async () => {
+    try {
+      const companies = await getPaymentCompanies();
+      setPaymentCompanies(companies);
+      if (!formData.payment_company_id && companies.length) {
+        setFormData((prev) => ({ ...prev, payment_company_id: companies[0].id }));
+      }
+    } catch (err) {
+      setPaymentCompanyMessage("Failed to load payment companies: " + err.message);
     }
   };
 
@@ -267,7 +299,7 @@ export default function Invoice() {
 
         setUserId(account.id);
         setAccountType(account.account_type);
-        await Promise.all([loadInvoices(account.id), loadProducts(), loadClients()]);
+        await Promise.all([loadInvoices(account.id), loadProducts(), loadClients(), loadPaymentCompanies()]);
 
         if (account.account_type === "Admin") {
           loadStock();
@@ -477,6 +509,64 @@ export default function Invoice() {
     }
   };
 
+  const handleNewPaymentCompanyChange = (e) => {
+    const { name, value } = e.target;
+    setNewPaymentCompany((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handlePaymentCompanyChange = (companyId, field, value) => {
+    setPaymentCompanies((prev) =>
+      prev.map((company) => (company.id === companyId ? { ...company, [field]: value } : company))
+    );
+  };
+
+  const createPaymentCompany = async (e) => {
+    e.preventDefault();
+    setPaymentCompanyMessage("");
+
+    try {
+      const data = await createPaymentCompanyApi(newPaymentCompany);
+      setPaymentCompanies((prev) => [...prev, data].sort((a, b) => a.company_name.localeCompare(b.company_name)));
+      setNewPaymentCompany({
+        company_name: "",
+        abn: "",
+        address_line_1: "",
+        address_line_2: "",
+        bsb: "",
+        account_name: "",
+        account_number: "",
+        notes: "",
+      });
+      setPaymentCompanyMessage("Receiving company created.");
+      setFormData((prev) => ({ ...prev, payment_company_id: data.id }));
+    } catch (err) {
+      setPaymentCompanyMessage("Failed to create receiving company: " + err.message);
+    }
+  };
+
+  const updatePaymentCompany = async (company) => {
+    setPaymentCompanyMessage("");
+
+    try {
+      const data = await updatePaymentCompanyApi(company.id, {
+        company_name: company.company_name,
+        abn: company.abn,
+        address_line_1: company.address_line_1,
+        address_line_2: company.address_line_2,
+        bsb: company.bsb,
+        account_name: company.account_name,
+        account_number: company.account_number,
+        notes: company.notes,
+      });
+      setPaymentCompanies((prev) =>
+        [...prev.map((item) => (item.id === company.id ? { ...item, ...data } : item))].sort((a, b) => a.company_name.localeCompare(b.company_name))
+      );
+      setPaymentCompanyMessage("Receiving company updated.");
+    } catch (err) {
+      setPaymentCompanyMessage("Failed to update receiving company: " + err.message);
+    }
+  };
+
   const requestDeleteClient = (client) => {
     setClientDeleteTarget(client);
   };
@@ -503,6 +593,24 @@ export default function Invoice() {
       setClientMessage("Failed to delete client: " + err.message);
     } finally {
       setIsDeletingClient(false);
+    }
+  };
+
+  const requestDeletePaymentCompany = async (company) => {
+    setPaymentCompanyMessage("");
+
+    try {
+      await deletePaymentCompanyApi(company.id);
+      setPaymentCompanies((prev) => prev.filter((item) => item.id !== company.id));
+      if (String(company.id) === String(formData.payment_company_id)) {
+        setFormData((prev) => ({ ...prev, payment_company_id: "" }));
+      }
+      if (String(company.id) === String(selectedPaymentCompanyId)) {
+        setSelectedPaymentCompanyId("");
+      }
+      setPaymentCompanyMessage("Receiving company deleted.");
+    } catch (err) {
+      setPaymentCompanyMessage("Failed to delete receiving company: " + err.message);
     }
   };
 
@@ -613,10 +721,10 @@ export default function Invoice() {
       return;
     }
 
-    if (!formData.invoice_number || !formData.client_name || !formData.issue_date) {
+    if (!formData.invoice_number || !formData.client_name || !formData.issue_date || !formData.payment_company_id) {
       setInvoiceNotice({
         title: "Missing invoice details",
-        message: "Please fill in all required fields: Invoice #, Client Name, and Issue Date.",
+        message: "Please fill in all required fields: Invoice #, Client Name, Receiving Company, and Issue Date.",
       });
       return;
     }
@@ -640,6 +748,7 @@ export default function Invoice() {
         user_id: userId,
         invoice_number: formData.invoice_number,
         client_name: formData.client_name,
+        payment_company_id: Number(formData.payment_company_id),
         issue_date: formData.issue_date,
         due_date: formData.due_date,
         items: formData.items,
@@ -911,6 +1020,9 @@ export default function Invoice() {
                   </ActionButton>
                   <ActionButton variant="muted" onClick={() => openInvoiceView("clients")}>
                     Client
+                  </ActionButton>
+                  <ActionButton variant="secondary" onClick={() => openInvoiceView("payment-companies")}>
+                    Receiving Company
                   </ActionButton>
                   <ActionButton variant="success" onClick={() => openInvoiceView("stock")}>
                     Stock Check
@@ -1255,6 +1367,99 @@ export default function Invoice() {
         </PagePanel>
       )}
 
+      {isAdmin && activeView === "payment-companies" && (
+        <PagePanel title="Receiving Company">
+          <form onSubmit={createPaymentCompany} className="form-grid payment-company-create-grid">
+            <input name="company_name" placeholder="Company Name" value={newPaymentCompany.company_name} onChange={handleNewPaymentCompanyChange} required className="form-control" />
+            <input name="abn" placeholder="ABN" value={newPaymentCompany.abn} onChange={handleNewPaymentCompanyChange} className="form-control" />
+            <input name="address_line_1" placeholder="Address line 1" value={newPaymentCompany.address_line_1} onChange={handleNewPaymentCompanyChange} className="form-control" />
+            <input name="address_line_2" placeholder="Address line 2" value={newPaymentCompany.address_line_2} onChange={handleNewPaymentCompanyChange} className="form-control" />
+            <input name="bsb" placeholder="BSB" value={newPaymentCompany.bsb} onChange={handleNewPaymentCompanyChange} className="form-control" />
+            <input name="account_name" placeholder="Account name" value={newPaymentCompany.account_name} onChange={handleNewPaymentCompanyChange} className="form-control" />
+            <input name="account_number" placeholder="Account number" value={newPaymentCompany.account_number} onChange={handleNewPaymentCompanyChange} className="form-control" />
+            <input name="notes" placeholder="Notes" value={newPaymentCompany.notes} onChange={handleNewPaymentCompanyChange} className="form-control" />
+            <ActionButton type="submit">Add company</ActionButton>
+          </form>
+
+          {paymentCompanyMessage && <p className="status-message">{paymentCompanyMessage}</p>}
+
+          {paymentCompanies.length === 0 ? (
+            <p>No receiving companies yet. Add your company details above.</p>
+          ) : (
+            <div className="payment-company-edit-grid">
+              <select value={selectedPaymentCompanyId} onChange={(e) => setSelectedPaymentCompanyId(e.target.value)} className="form-control">
+                <option value="">Select company to edit</option>
+                {paymentCompanies.map((company) => (
+                  <option key={company.id} value={company.id}>{company.company_name}</option>
+                ))}
+              </select>
+              <input
+                placeholder="Company name"
+                value={paymentCompanies.find((company) => String(company.id) === String(selectedPaymentCompanyId))?.company_name ?? ""}
+                disabled={!selectedPaymentCompanyId}
+                onChange={(e) => handlePaymentCompanyChange(Number(selectedPaymentCompanyId), "company_name", e.target.value)}
+                className="form-control"
+              />
+              <input
+                placeholder="ABN"
+                value={paymentCompanies.find((company) => String(company.id) === String(selectedPaymentCompanyId))?.abn ?? ""}
+                disabled={!selectedPaymentCompanyId}
+                onChange={(e) => handlePaymentCompanyChange(Number(selectedPaymentCompanyId), "abn", e.target.value)}
+                className="form-control"
+              />
+              <input
+                placeholder="Address line 1"
+                value={paymentCompanies.find((company) => String(company.id) === String(selectedPaymentCompanyId))?.address_line_1 ?? ""}
+                disabled={!selectedPaymentCompanyId}
+                onChange={(e) => handlePaymentCompanyChange(Number(selectedPaymentCompanyId), "address_line_1", e.target.value)}
+                className="form-control"
+              />
+              <input
+                placeholder="Address line 2"
+                value={paymentCompanies.find((company) => String(company.id) === String(selectedPaymentCompanyId))?.address_line_2 ?? ""}
+                disabled={!selectedPaymentCompanyId}
+                onChange={(e) => handlePaymentCompanyChange(Number(selectedPaymentCompanyId), "address_line_2", e.target.value)}
+                className="form-control"
+              />
+              <input
+                placeholder="BSB"
+                value={paymentCompanies.find((company) => String(company.id) === String(selectedPaymentCompanyId))?.bsb ?? ""}
+                disabled={!selectedPaymentCompanyId}
+                onChange={(e) => handlePaymentCompanyChange(Number(selectedPaymentCompanyId), "bsb", e.target.value)}
+                className="form-control"
+              />
+              <input
+                placeholder="Account name"
+                value={paymentCompanies.find((company) => String(company.id) === String(selectedPaymentCompanyId))?.account_name ?? ""}
+                disabled={!selectedPaymentCompanyId}
+                onChange={(e) => handlePaymentCompanyChange(Number(selectedPaymentCompanyId), "account_name", e.target.value)}
+                className="form-control"
+              />
+              <input
+                placeholder="Account number"
+                value={paymentCompanies.find((company) => String(company.id) === String(selectedPaymentCompanyId))?.account_number ?? ""}
+                disabled={!selectedPaymentCompanyId}
+                onChange={(e) => handlePaymentCompanyChange(Number(selectedPaymentCompanyId), "account_number", e.target.value)}
+                className="form-control"
+              />
+              <input
+                placeholder="Notes"
+                value={paymentCompanies.find((company) => String(company.id) === String(selectedPaymentCompanyId))?.notes ?? ""}
+                disabled={!selectedPaymentCompanyId}
+                onChange={(e) => handlePaymentCompanyChange(Number(selectedPaymentCompanyId), "notes", e.target.value)}
+                className="form-control"
+              />
+              <ActionButton type="button" disabled={!selectedPaymentCompanyId} variant="confirm" onClick={() => updatePaymentCompany(paymentCompanies.find((company) => String(company.id) === String(selectedPaymentCompanyId)))}>
+                Save
+              </ActionButton>
+              <ActionButton type="button" disabled={!selectedPaymentCompanyId} variant="danger" onClick={() => requestDeletePaymentCompany(paymentCompanies.find((company) => String(company.id) === String(selectedPaymentCompanyId)))}>
+                Delete
+              </ActionButton>
+            </div>
+          )}
+        </PagePanel>
+      )}
+
       {isAdmin && activeView === "items" && (
         <PagePanel title="Create Item">
           <form onSubmit={createProduct} className="form-grid product-create-grid">
@@ -1362,6 +1567,18 @@ export default function Invoice() {
                   <option key={client.id} value={client.client_name}>
                     {client.client_name}
                   </option>
+                ))}
+              </select>
+              <select
+                name="payment_company_id"
+                value={formData.payment_company_id ?? ""}
+                onChange={(e) => setFormData((prev) => ({ ...prev, payment_company_id: e.target.value }))}
+                required
+                className="form-control"
+              >
+                <option value="">{paymentCompanies.length ? "Select receiving company" : "Create receiving company first"}</option>
+                {paymentCompanies.map((company) => (
+                  <option key={company.id} value={company.id}>{company.company_name}</option>
                 ))}
               </select>
               <input type="date" name="issue_date" value={formData.issue_date} readOnly className="form-control form-control--readonly" />

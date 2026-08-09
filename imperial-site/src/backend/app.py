@@ -11,6 +11,7 @@ from controllers.dashboard_controller import dashboard_bp
 from controllers.delivery_controller import delivery_bp
 from controllers.inventory_controller import inventory_bp
 from controllers.invoices_controller import invoices_bp
+from controllers.payment_companies_controller import payment_companies_bp
 from controllers.products_controller import products_bp
 from core.config import BASE_DIR, CORS_ORIGINS, SECRET_KEY
 from core.database import get_db
@@ -30,6 +31,7 @@ app.register_blueprint(dashboard_bp)
 app.register_blueprint(delivery_bp)
 app.register_blueprint(inventory_bp)
 app.register_blueprint(invoices_bp)
+app.register_blueprint(payment_companies_bp)
 app.register_blueprint(products_bp)
 
 # -------------------------
@@ -139,7 +141,7 @@ def init_db():
     invoice_columns = {column[1] for column in cursor.fetchall()}
     expected_invoice_columns = {
         "id", "user_id", "invoice_number", "client_name", "issue_date", "due_date",
-        "items", "subtotal", "tax", "total", "status", "created_at"
+        "items", "subtotal", "tax", "total", "status", "created_at", "payment_company_id"
     }
     if invoice_columns and invoice_columns != expected_invoice_columns:
         cursor.execute("ALTER TABLE invoices RENAME TO invoices_old")
@@ -157,24 +159,58 @@ def init_db():
             total REAL NOT NULL,
             status TEXT DEFAULT 'draft',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id)
+            payment_company_id INTEGER,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (payment_company_id) REFERENCES payment_companies(id)
         )
         """)
 
         status_expression = "status" if "status" in invoice_columns else "'draft'"
         created_at_expression = "created_at" if "created_at" in invoice_columns else "CURRENT_TIMESTAMP"
+        payment_company_expression = "payment_company_id" if "payment_company_id" in invoice_columns else "NULL"
 
         cursor.execute(f"""
             INSERT INTO invoices (
                 id, user_id, invoice_number, client_name, issue_date, due_date,
-                items, subtotal, tax, total, status, created_at
+                items, subtotal, tax, total, status, created_at, payment_company_id
             )
             SELECT
                 id, user_id, invoice_number, client_name, issue_date, due_date,
-                items, subtotal, tax, total, {status_expression}, {created_at_expression}
+                items, subtotal, tax, total, {status_expression}, {created_at_expression}, {payment_company_expression}
             FROM invoices_old
         """)
         cursor.execute("DROP TABLE invoices_old")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS payment_companies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_name TEXT UNIQUE NOT NULL,
+            abn TEXT,
+            address_line_1 TEXT,
+            address_line_2 TEXT,
+            bsb TEXT,
+            account_name TEXT,
+            account_number TEXT,
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("SELECT COUNT(*) FROM payment_companies")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("""
+            INSERT INTO payment_companies (
+                company_name, abn, address_line_1, address_line_2, bsb, account_name, account_number, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            "ONE PACIFIC TRADING PTY LTD",
+            "16 643 396 203",
+            "4 Gatwood Close",
+            "Padstow Sydney NSW 2211",
+            "633 000",
+            "ONE PACIFIC TRADING PTY LTD",
+            "2149 1026 7",
+            "Please Use Quote Or Invoice number As Ref"
+        ))
 
     cursor.execute("""
         INSERT OR IGNORE INTO clients (client_name)

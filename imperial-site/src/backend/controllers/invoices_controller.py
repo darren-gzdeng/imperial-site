@@ -37,6 +37,7 @@ def create_invoice(user):
         user_id = data.get("user_id")
         invoice_number = data.get("invoice_number")
         client_name = data.get("client_name")
+        payment_company_id = data.get("payment_company_id")
         issue_date = data.get("issue_date")
         due_date = data.get("due_date")
         items = data.get("items")
@@ -44,11 +45,12 @@ def create_invoice(user):
         tax = data.get("tax")
         total = data.get("total")
 
-        if not all([user_id, invoice_number, client_name, issue_date, items]):
+        if not all([user_id, invoice_number, client_name, payment_company_id, issue_date, items]):
             missing = []
             if not user_id: missing.append("user_id")
             if not invoice_number: missing.append("invoice_number")
             if not client_name: missing.append("client_name")
+            if not payment_company_id: missing.append("payment_company_id")
             if not issue_date: missing.append("issue_date")
             if not items: missing.append("items")
             return jsonify({"error": f"Missing required fields: {', '.join(missing)}"}), 400
@@ -82,9 +84,9 @@ def create_invoice(user):
                     }), 400
 
             cursor.execute("""
-                INSERT INTO invoices (user_id, invoice_number, client_name, issue_date, due_date, items, subtotal, tax, total)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (user_id, invoice_number, client_name, issue_date, due_date, json.dumps(items), subtotal, tax, total))
+                INSERT INTO invoices (user_id, invoice_number, client_name, issue_date, due_date, items, subtotal, tax, total, payment_company_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, invoice_number, client_name, issue_date, due_date, json.dumps(items), subtotal, tax, total, payment_company_id))
             invoice_id = cursor.lastrowid
             for product_id, quantity in movements.items():
                 cursor.execute("""
@@ -108,7 +110,7 @@ def create_invoice(user):
             conn.commit()
             cursor.execute("""
                 SELECT id, user_id, invoice_number, client_name, issue_date, due_date,
-                       items, subtotal, tax, total, status, created_at
+                       items, subtotal, tax, total, status, created_at, payment_company_id
                 FROM invoices
                 WHERE id=?
             """, (invoice_id,))
@@ -137,7 +139,7 @@ def get_invoices(user, user_id):
     try:
         cursor.execute("""
             SELECT id, user_id, invoice_number, client_name, issue_date, due_date,
-                   items, subtotal, tax, total, status, created_at
+                   items, subtotal, tax, total, status, created_at, payment_company_id
             FROM invoices
             ORDER BY created_at DESC
         """)
@@ -215,6 +217,12 @@ def generate_invoice_pdf(user, invoice_id):
 
         if not invoice:
             return jsonify({"error": "Invoice not found"}), 404
+
+        payment_company_id = invoice[12] if len(invoice) > 12 else None
+        payment_company = None
+        if payment_company_id:
+            cursor.execute("SELECT company_name, abn, address_line_1, address_line_2, bsb, account_name, account_number, notes FROM payment_companies WHERE id=?", (payment_company_id,))
+            payment_company = cursor.fetchone()
 
         pdf_buffer = BytesIO()
         doc = SimpleDocTemplate(
@@ -348,18 +356,25 @@ def generate_invoice_pdf(user, invoice_id):
         issue_date = format_au_date(invoice[4])
         due_date = format_au_date(invoice[5] or invoice[4])
 
-        business_name = "ONE PACIFIC TRADING PTY LTD"
-        business_address_lines = [
-            "4 Gatwood Close",
-            "Padstow Sydney NSW 2211",
-        ]
-        business_abn = "16 643 396 203"
+        business_name = payment_company[0] if payment_company else "ONE PACIFIC TRADING PTY LTD"
+        business_address_lines = []
+        if payment_company:
+            if payment_company[2]:
+                business_address_lines.append(payment_company[2])
+            if payment_company[3]:
+                business_address_lines.append(payment_company[3])
+        if not business_address_lines:
+            business_address_lines = [
+                "4 Gatwood Close",
+                "Padstow Sydney NSW 2211",
+            ]
+        business_abn = payment_company[1] if payment_company else "16 643 396 203"
         eft_lines = [
             "EFT Bank Payments:",
-            "Account Name: ONE PACIFIC TRADING PTY LTD",
-            "BSB: 633 000",
-            "Account Number: 2149 1026 7",
-            "Please Use Quote Or Invoice number As Ref",
+            f"Account Name: {payment_company[5] if payment_company and payment_company[5] else business_name}",
+            f"BSB: {payment_company[4] if payment_company and payment_company[4] else '633 000'}",
+            f"Account Number: {payment_company[6] if payment_company and payment_company[6] else '2149 1026 7'}",
+            payment_company[7] if payment_company and payment_company[7] else "Please Use Quote Or Invoice number As Ref",
         ]
 
         top_spacer = Table([[""]], colWidths=[7.5 * inch], rowHeights=[0.25 * inch])

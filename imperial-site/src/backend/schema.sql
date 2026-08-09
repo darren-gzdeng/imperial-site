@@ -35,6 +35,19 @@ CREATE TABLE IF NOT EXISTS clients (
     client_name TEXT UNIQUE NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS payment_companies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_name TEXT UNIQUE NOT NULL,
+    abn TEXT,
+    address_line_1 TEXT,
+    address_line_2 TEXT,
+    bsb TEXT,
+    account_name TEXT,
+    account_number TEXT,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS inventory (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     product_id INTEGER NOT NULL UNIQUE,
@@ -137,5 +150,7 @@ CREATE TABLE IF NOT EXISTS invoices (
     total REAL NOT NULL,
     status TEXT DEFAULT 'draft',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id)
+    payment_company_id INTEGER,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (payment_company_id) REFERENCES payment_companies(id)
 );
