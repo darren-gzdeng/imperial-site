@@ -151,6 +151,7 @@ CREATE TABLE IF NOT EXISTS invoices (
     status TEXT DEFAULT 'draft',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     payment_company_id INTEGER,
+    invoice_format TEXT DEFAULT '1',
     FOREIGN KEY (user_id) REFERENCES users(id),
     FOREIGN KEY (payment_company_id) REFERENCES payment_companies(id)
 );

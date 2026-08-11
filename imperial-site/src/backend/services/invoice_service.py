@@ -16,4 +16,5 @@ def serialize_invoice_row(row):
         "status": row[10],
         "created_at": row[11],
         "payment_company_id": row[12] if len(row) > 12 else None,
+        "invoice_format": row[13] if len(row) > 13 else "1",
     }

@@ -44,6 +44,14 @@ def create_invoice(user):
         subtotal = data.get("subtotal")
         tax = data.get("tax")
         total = data.get("total")
+        invoice_format = str(data.get("invoice_format") or "1")
+
+        if invoice_format not in {"1", "2"}:
+            return jsonify({"error": "Invalid invoice format"}), 400
+
+        if invoice_format == "2":
+            tax = 0
+            subtotal = total
 
         if not all([user_id, invoice_number, client_name, payment_company_id, issue_date, items]):
             missing = []
@@ -84,9 +92,9 @@ def create_invoice(user):
                     }), 400
 
             cursor.execute("""
-                INSERT INTO invoices (user_id, invoice_number, client_name, issue_date, due_date, items, subtotal, tax, total, payment_company_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (user_id, invoice_number, client_name, issue_date, due_date, json.dumps(items), subtotal, tax, total, payment_company_id))
+                INSERT INTO invoices (user_id, invoice_number, client_name, issue_date, due_date, items, subtotal, tax, total, payment_company_id, invoice_format)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, invoice_number, client_name, issue_date, due_date, json.dumps(items), subtotal, tax, total, payment_company_id, invoice_format))
             invoice_id = cursor.lastrowid
             for product_id, quantity in movements.items():
                 cursor.execute("""
@@ -110,7 +118,7 @@ def create_invoice(user):
             conn.commit()
             cursor.execute("""
                 SELECT id, user_id, invoice_number, client_name, issue_date, due_date,
-                       items, subtotal, tax, total, status, created_at, payment_company_id
+                       items, subtotal, tax, total, status, created_at, payment_company_id, invoice_format
                 FROM invoices
                 WHERE id=?
             """, (invoice_id,))
@@ -139,7 +147,7 @@ def get_invoices(user, user_id):
     try:
         cursor.execute("""
             SELECT id, user_id, invoice_number, client_name, issue_date, due_date,
-                   items, subtotal, tax, total, status, created_at, payment_company_id
+                   items, subtotal, tax, total, status, created_at, payment_company_id, invoice_format
             FROM invoices
             ORDER BY created_at DESC
         """)
@@ -219,6 +227,7 @@ def generate_invoice_pdf(user, invoice_id):
             return jsonify({"error": "Invoice not found"}), 404
 
         payment_company_id = invoice[12] if len(invoice) > 12 else None
+        invoice_format = str(invoice[13] if len(invoice) > 13 and invoice[13] else "1")
         payment_company = None
         if payment_company_id:
             cursor.execute("SELECT company_name, abn, address_line_1, address_line_2, bsb, account_name, account_number, notes FROM payment_companies WHERE id=?", (payment_company_id,))
@@ -495,13 +504,21 @@ def generate_invoice_pdf(user, invoice_id):
 
         totals_rows = [
             [Paragraph("Subtotal", totals_label_style), Paragraph(f"{float(invoice[7]):.2f}", totals_value_style)],
-            [Paragraph("TOTAL GST 10%", totals_label_style), Paragraph(f"{float(invoice[8]):.2f}", totals_value_style)],
-            [Paragraph("TOTAL AUD", totals_total_label_style), Paragraph(f"{float(invoice[9]):.2f}", totals_total_value_style)],
         ]
+        if invoice_format != "2":
+            totals_rows.append([
+                Paragraph("TOTAL GST 10%", totals_label_style),
+                Paragraph(f"{float(invoice[8]):.2f}", totals_value_style),
+            ])
+        totals_rows.append([
+            Paragraph("TOTAL AUD", totals_total_label_style),
+            Paragraph(f"{float(invoice[9]):.2f}", totals_total_value_style),
+        ])
+        total_row_index = len(totals_rows) - 1
         totals_table = Table(totals_rows, colWidths=[1.3 * inch, 1.2 * inch])
         totals_table.setStyle(TableStyle([
             ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
-            ('LINEABOVE', (0, 2), (-1, 2), 1, black),
+            ('LINEABOVE', (0, total_row_index), (-1, total_row_index), 1, black),
             ('TOPPADDING', (0, 0), (-1, -1), 2),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
             ('LEFTPADDING', (0, 0), (-1, -1), 3),
@@ -633,5 +650,3 @@ def generate_invoice_pdf(user, invoice_id):
         return jsonify({"error": f"PDF generation error: {str(e)}"}), 500
     finally:
         conn.close()
-
-

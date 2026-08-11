@@ -141,7 +141,8 @@ def init_db():
     invoice_columns = {column[1] for column in cursor.fetchall()}
     expected_invoice_columns = {
         "id", "user_id", "invoice_number", "client_name", "issue_date", "due_date",
-        "items", "subtotal", "tax", "total", "status", "created_at", "payment_company_id"
+        "items", "subtotal", "tax", "total", "status", "created_at", "payment_company_id",
+        "invoice_format"
     }
     if invoice_columns and invoice_columns != expected_invoice_columns:
         cursor.execute("ALTER TABLE invoices RENAME TO invoices_old")
@@ -160,6 +161,7 @@ def init_db():
             status TEXT DEFAULT 'draft',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             payment_company_id INTEGER,
+            invoice_format TEXT DEFAULT '1',
             FOREIGN KEY (user_id) REFERENCES users(id),
             FOREIGN KEY (payment_company_id) REFERENCES payment_companies(id)
         )
@@ -168,15 +170,16 @@ def init_db():
         status_expression = "status" if "status" in invoice_columns else "'draft'"
         created_at_expression = "created_at" if "created_at" in invoice_columns else "CURRENT_TIMESTAMP"
         payment_company_expression = "payment_company_id" if "payment_company_id" in invoice_columns else "NULL"
+        invoice_format_expression = "invoice_format" if "invoice_format" in invoice_columns else "'1'"
 
         cursor.execute(f"""
             INSERT INTO invoices (
                 id, user_id, invoice_number, client_name, issue_date, due_date,
-                items, subtotal, tax, total, status, created_at, payment_company_id
+                items, subtotal, tax, total, status, created_at, payment_company_id, invoice_format
             )
             SELECT
                 id, user_id, invoice_number, client_name, issue_date, due_date,
-                items, subtotal, tax, total, {status_expression}, {created_at_expression}, {payment_company_expression}
+                items, subtotal, tax, total, {status_expression}, {created_at_expression}, {payment_company_expression}, {invoice_format_expression}
             FROM invoices_old
         """)
         cursor.execute("DROP TABLE invoices_old")

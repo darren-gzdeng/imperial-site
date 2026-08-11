@@ -117,6 +117,7 @@ const createInitialFormData = (invoices = []) => {
     invoice_number: generateInvoiceNumber(invoices, today),
     client_name: "",
     payment_company_id: "",
+    invoice_format: "1",
     issue_date: formatDateInput(today),
     due_date: formatDateInput(addDays(today, 14)),
     items: [{ product_id: "", description: "", quantity: 1, unit_price: 0, amount: 0 }],
@@ -343,8 +344,9 @@ export default function Invoice() {
 
   const calculateTotals = () => {
     const total = formData.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-    const subtotal = total / 1.1;
-    const tax = total - subtotal;
+    const isNoGstFormat = String(formData.invoice_format || "1") === "2";
+    const subtotal = isNoGstFormat ? total : total / 1.1;
+    const tax = isNoGstFormat ? 0 : total - subtotal;
     return { subtotal, tax, total };
   };
 
@@ -749,6 +751,7 @@ export default function Invoice() {
         invoice_number: formData.invoice_number,
         client_name: formData.client_name,
         payment_company_id: Number(formData.payment_company_id),
+        invoice_format: formData.invoice_format || "1",
         issue_date: formData.issue_date,
         due_date: formData.due_date,
         items: formData.items,
@@ -1556,6 +1559,15 @@ export default function Invoice() {
             <div className="form-grid form-grid--two">
               <input type="text" name="invoice_number" value={formData.invoice_number} readOnly className="form-control form-control--readonly" />
               <select
+                name="invoice_format"
+                value={formData.invoice_format || "1"}
+                onChange={(e) => setFormData((prev) => ({ ...prev, invoice_format: e.target.value }))}
+                className="form-control"
+              >
+                <option value="1">Invoice format 1 - GST 10%</option>
+                <option value="2">Invoice format 2 - GST 0%</option>
+              </select>
+              <select
                 name="client_name"
                 value={formData.client_name}
                 onChange={(e) => handleInvoiceClientSelect(e.target.value)}
@@ -1631,7 +1643,9 @@ export default function Invoice() {
 
             <div className="invoice-totals">
               <p><strong>Subtotal:</strong> ${subtotal.toFixed(2)}</p>
-              <p><strong>GST included (10%):</strong> ${tax.toFixed(2)}</p>
+              {String(formData.invoice_format || "1") !== "2" && (
+                <p><strong>GST included (10%):</strong> ${tax.toFixed(2)}</p>
+              )}
               <p className="invoice-totals__total"><strong>Total:</strong> ${total.toFixed(2)}</p>
             </div>
 
