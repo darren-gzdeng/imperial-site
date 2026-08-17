@@ -24,6 +24,85 @@ from services.stock_service import (
 
 invoices_bp = Blueprint("invoices", __name__)
 
+INVOICE_STATUS_TRANSITIONS = {
+    "send": {"draft"},
+    "mark-paid": {"draft", "sent"},
+    "cancel": {"draft", "sent"},
+}
+
+
+def get_invoice_by_id(cursor, invoice_id):
+    cursor.execute("""
+        SELECT id, user_id, invoice_number, client_name, issue_date, due_date,
+               items, subtotal, tax, total, status, created_at, payment_company_id, invoice_format
+        FROM invoices
+        WHERE id=?
+    """, (invoice_id,))
+    row = cursor.fetchone()
+    return serialize_invoice_row(row) if row else None
+
+
+def transition_invoice_status(invoice_id, action, next_status):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        invoice = get_invoice_by_id(cursor, invoice_id)
+
+        if not invoice:
+            return jsonify({"error": "Invoice not found"}), 404
+
+        current_status = invoice.get("status") or "draft"
+        if current_status not in INVOICE_STATUS_TRANSITIONS[action]:
+            return jsonify({"error": f"Cannot {action} invoice with status {current_status}"}), 400
+
+        cursor.execute("""
+            UPDATE invoices
+            SET status=?
+            WHERE id=?
+        """, (next_status, invoice_id))
+        conn.commit()
+
+        return jsonify(get_invoice_by_id(cursor, invoice_id))
+    finally:
+        conn.close()
+
+
+def validate_invoice_items(cursor, items):
+    for item in items:
+        quantity = normalize_quantity(item.get("quantity"))
+        if not (item.get("description") and quantity is not None):
+            continue
+
+        product_id, _ = resolve_invoice_item_product(cursor, item)
+        if not product_id:
+            return f"Invoice item does not match an existing product: {item.get('description')}"
+
+    return ""
+
+
+def apply_invoice_stock_movements(cursor, movements, labels, invoice_id, invoice_number, user_id, action_type, comment_prefix, multiplier):
+    for product_id, quantity in movements.items():
+        change_quantity = quantity * multiplier
+        cursor.execute("""
+            UPDATE inventory
+            SET stock_quantity = stock_quantity + ?
+            WHERE product_id=?
+        """, (change_quantity, product_id))
+        cursor.execute("SELECT stock_quantity FROM inventory WHERE product_id=?", (product_id,))
+        stock_after = cursor.fetchone()[0]
+        record_stock_history(
+            cursor,
+            product_id,
+            change_quantity,
+            stock_after,
+            action_type,
+            f"{comment_prefix} {invoice_number}",
+            reference_type="invoice",
+            reference_id=invoice_id,
+            created_by=user_id,
+        )
+
 
 # -------------------------
 # Create Invoice
@@ -159,6 +238,115 @@ def get_invoices(user, user_id):
 
 
 # -------------------------
+# Update Draft Invoice
+# -------------------------
+@invoices_bp.route('/invoices/<int:invoice_id>', methods=['PATCH'])
+@staff_or_admin_required
+def update_invoice(user, invoice_id):
+    data = request.json or {}
+
+    client_name = data.get("client_name")
+    payment_company_id = data.get("payment_company_id")
+    due_date = data.get("due_date")
+    items = data.get("items")
+    subtotal = data.get("subtotal")
+    tax = data.get("tax")
+    total = data.get("total")
+    invoice_format = str(data.get("invoice_format") or "1")
+
+    if invoice_format not in {"1", "2"}:
+        return jsonify({"error": "Invalid invoice format"}), 400
+
+    if invoice_format == "2":
+        tax = 0
+        subtotal = total
+
+    if not all([client_name, payment_company_id, items]):
+        missing = []
+        if not client_name: missing.append("client_name")
+        if not payment_company_id: missing.append("payment_company_id")
+        if not items: missing.append("items")
+        return jsonify({"error": f"Missing required fields: {', '.join(missing)}"}), 400
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    try:
+        invoice = get_invoice_by_id(cursor, invoice_id)
+        if not invoice:
+            return jsonify({"error": "Invoice not found"}), 404
+
+        if (invoice.get("status") or "draft") != "draft":
+            return jsonify({"error": "Only draft invoices can be edited"}), 400
+
+        item_error = validate_invoice_items(cursor, items)
+        if item_error:
+            return jsonify({"error": item_error}), 400
+
+        old_movements, old_labels = get_invoice_stock_movements(cursor, invoice["items"])
+        new_movements, new_labels = get_invoice_stock_movements(cursor, items)
+
+        ensure_inventory_rows(cursor)
+        apply_invoice_stock_movements(
+            cursor,
+            old_movements,
+            old_labels,
+            invoice_id,
+            invoice["invoice_number"],
+            user["user_id"],
+            "invoice_draft_edit_return",
+            "Draft edit stock return from",
+            1,
+        )
+
+        for product_id, quantity in new_movements.items():
+            cursor.execute("SELECT stock_quantity FROM inventory WHERE product_id=?", (product_id,))
+            stock_row = cursor.fetchone()
+            available = stock_row[0] if stock_row else 0
+
+            if available < quantity:
+                return jsonify({
+                    "error": f"Not enough stock for {new_labels.get(product_id, 'item')}. Available: {available}, required: {quantity}"
+                }), 400
+
+        apply_invoice_stock_movements(
+            cursor,
+            new_movements,
+            new_labels,
+            invoice_id,
+            invoice["invoice_number"],
+            user["user_id"],
+            "invoice_draft_edit_sale",
+            "Draft edit stock sale on",
+            -1,
+        )
+
+        cursor.execute("""
+            UPDATE invoices
+            SET client_name=?, due_date=?, items=?, subtotal=?, tax=?, total=?,
+                payment_company_id=?, invoice_format=?
+            WHERE id=?
+        """, (
+            client_name,
+            due_date or invoice["due_date"],
+            json.dumps(items),
+            subtotal,
+            tax,
+            total,
+            payment_company_id,
+            invoice_format,
+            invoice_id,
+        ))
+        conn.commit()
+
+        return jsonify(get_invoice_by_id(cursor, invoice_id))
+    except sqlite3.IntegrityError as e:
+        return jsonify({"error": f"Database error: {str(e)}"}), 400
+    finally:
+        conn.close()
+
+
+# -------------------------
 # Delete Invoice
 # -------------------------
 @invoices_bp.route('/invoices/<int:invoice_id>', methods=['DELETE'])
@@ -208,6 +396,27 @@ def delete_invoice(user, invoice_id):
         return jsonify({"message": "Invoice deleted successfully"})
     finally:
         conn.close()
+
+
+# -------------------------
+# Invoice Payment Workflow
+# -------------------------
+@invoices_bp.route('/invoices/<int:invoice_id>/send', methods=['POST'])
+@staff_or_admin_required
+def send_invoice(user, invoice_id):
+    return transition_invoice_status(invoice_id, "send", "sent")
+
+
+@invoices_bp.route('/invoices/<int:invoice_id>/mark-paid', methods=['POST'])
+@staff_or_admin_required
+def mark_invoice_paid(user, invoice_id):
+    return transition_invoice_status(invoice_id, "mark-paid", "paid")
+
+
+@invoices_bp.route('/invoices/<int:invoice_id>/cancel', methods=['POST'])
+@staff_or_admin_required
+def cancel_invoice(user, invoice_id):
+    return transition_invoice_status(invoice_id, "cancel", "canceled")
 
 
 # -------------------------

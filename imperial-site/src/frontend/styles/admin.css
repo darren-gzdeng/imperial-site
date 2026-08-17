@@ -385,29 +385,63 @@
 
 .invoice-list-table th:nth-child(1),
 .invoice-list-table td:nth-child(1) {
-  width: 16%;
+  width: 15%;
 }
 
 .invoice-list-table th:nth-child(2),
 .invoice-list-table td:nth-child(2) {
-  width: 29%;
+  width: 22%;
 }
 
 .invoice-list-table th:nth-child(3),
 .invoice-list-table td:nth-child(3) {
-  width: 16%;
+  width: 12%;
 }
 
 .invoice-list-table th:nth-child(4),
 .invoice-list-table td:nth-child(4) {
-  width: 14%;
-  text-align: right;
+  width: 10%;
 }
 
 .invoice-list-table th:nth-child(5),
 .invoice-list-table td:nth-child(5) {
-  width: 25%;
+  width: 10%;
+  text-align: right;
+}
+
+.invoice-list-table th:nth-child(6),
+.invoice-list-table td:nth-child(6) {
+  width: 31%;
   text-align: center;
+}
+
+.invoice-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 74px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.invoice-status--sent {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.invoice-status--paid {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.invoice-status--canceled {
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .invoice-filter-bar {
@@ -514,11 +548,23 @@
 }
 
 .invoice-list-table__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
   text-align: center;
 }
 
+.invoice-list-table__actions .action-button {
+  min-width: 58px;
+  min-height: 30px;
+  padding: 6px 8px;
+  white-space: nowrap;
+  line-height: 1;
+}
+
 .invoice-list-table__delete {
-  margin-left: 8px;
+  margin-left: 0;
 }
 
 .delivery-check-list {

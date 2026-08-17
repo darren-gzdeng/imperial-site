@@ -15,10 +15,14 @@ import {
   removeStock as removeStockApi,
 } from "../api/inventoryApi";
 import {
+  cancelInvoice as cancelInvoiceApi,
   createInvoice as createInvoiceApi,
   deleteInvoice as deleteInvoiceApi,
   downloadInvoicePdf,
   getInvoices,
+  markInvoicePaid as markInvoicePaidApi,
+  sendInvoice as sendInvoiceApi,
+  updateInvoice as updateInvoiceApi,
 } from "../api/invoicesApi";
 import {
   createProduct as createProductApi,
@@ -126,6 +130,7 @@ const createInitialFormData = (invoices = []) => {
 
 const sortClients = (clients) => [...clients].sort((a, b) => a.client_name.localeCompare(b.client_name));
 const sortProducts = (products) => [...products].sort((a, b) => a.item.localeCompare(b.item));
+const formatInvoiceStatus = (status) => String(status || "draft").replaceAll("_", " ");
 
 const parseDateString = (value) => {
   if (!value) {
@@ -200,6 +205,7 @@ export default function Invoice() {
   const [selectedPaymentCompanyId, setSelectedPaymentCompanyId] = useState("");
   const [activeView, setActiveView] = useState("menu");
   const [formData, setFormData] = useState(createInitialFormData());
+  const [editingInvoiceId, setEditingInvoiceId] = useState(null);
   const [userId, setUserId] = useState(null);
   const [accountType, setAccountType] = useState("");
   const [isCreatingInvoice, setIsCreatingInvoice] = useState(false);
@@ -400,6 +406,41 @@ export default function Invoice() {
           ? [{ product_id: "", description: "", quantity: 1, unit_price: 0, amount: 0 }]
           : prev.items.filter((_, itemIndex) => itemIndex !== index),
     }));
+  };
+
+  const openDraftInvoiceEditor = (invoice) => {
+    if ((invoice.status || "draft") !== "draft") {
+      setInvoiceNotice({
+        title: "Invoice locked",
+        message: "Only draft invoices can be edited.",
+      });
+      return;
+    }
+
+    setEditingInvoiceId(invoice.id);
+    setFormData({
+      invoice_number: invoice.invoice_number,
+      client_name: invoice.client_name || "",
+      payment_company_id: invoice.payment_company_id || "",
+      invoice_format: invoice.invoice_format || "1",
+      issue_date: invoice.issue_date || formatDateInput(new Date()),
+      due_date: invoice.due_date || invoice.issue_date || formatDateInput(addDays(new Date(), 14)),
+      items: invoice.items && invoice.items.length
+        ? invoice.items.map((item) => ({
+            product_id: item.product_id || "",
+            description: item.description || "",
+            quantity: Number(item.quantity) || 1,
+            unit_price: Number(item.unit_price) || 0,
+            amount: Number(item.amount) || 0,
+          }))
+        : [{ product_id: "", description: "", quantity: 1, unit_price: 0, amount: 0 }],
+    });
+    setActiveView("create");
+  };
+
+  const resetInvoiceForm = (nextInvoices = invoices) => {
+    setEditingInvoiceId(null);
+    setFormData(createInitialFormData(nextInvoices));
   };
 
   const handleNewProductChange = (e) => {
@@ -746,7 +787,7 @@ export default function Invoice() {
     setIsCreatingInvoice(true);
 
     try {
-      const createdInvoice = await createInvoiceApi({
+      const payload = {
         user_id: userId,
         invoice_number: formData.invoice_number,
         client_name: formData.client_name,
@@ -758,11 +799,30 @@ export default function Invoice() {
         subtotal,
         tax,
         total,
-      });
+      };
+
+      if (editingInvoiceId) {
+        const updatedInvoice = await updateInvoiceApi(editingInvoiceId, payload);
+        const nextInvoices = invoices.map((invoice) => (invoice.id === updatedInvoice.id ? updatedInvoice : invoice));
+        setInvoices(nextInvoices);
+        resetInvoiceForm(nextInvoices);
+        setActiveView("menu");
+        setInvoiceNotice({
+          title: "Invoice updated",
+          message: "The draft invoice has been updated successfully.",
+        });
+        loadProducts();
+        if (isAdmin) {
+          loadStock();
+        }
+        return;
+      }
+
+      const createdInvoice = await createInvoiceApi(payload);
 
       const nextInvoices = [createdInvoice, ...invoices];
       setInvoices(nextInvoices);
-      setFormData(createInitialFormData(nextInvoices));
+      resetInvoiceForm(nextInvoices);
       applyInvoiceStockChange(formData.items);
       setActiveView("menu");
       setInvoiceNotice({
@@ -794,6 +854,22 @@ export default function Invoice() {
       setInvoiceNotice({
         title: "Download failed",
         message: `Failed to download invoice: ${err.message}`,
+      });
+    }
+  };
+
+  const updateInvoiceWorkflow = async (invoice, action, actionLabel) => {
+    try {
+      const updatedInvoice = await action(invoice.id);
+      setInvoices((prev) => prev.map((item) => (item.id === updatedInvoice.id ? updatedInvoice : item)));
+      setInvoiceNotice({
+        title: "Invoice updated",
+        message: `${invoice.invoice_number} is now ${formatInvoiceStatus(updatedInvoice.status)}.`,
+      });
+    } catch (err) {
+      setInvoiceNotice({
+        title: `${actionLabel} failed`,
+        message: `Failed to ${actionLabel.toLowerCase()} invoice: ${err.message}`,
       });
     }
   };
@@ -851,6 +927,10 @@ export default function Invoice() {
       return;
     }
 
+    if (view === "create") {
+      resetInvoiceForm();
+    }
+
     setActiveView(view);
 
     if (view === "stock") {
@@ -861,6 +941,9 @@ export default function Invoice() {
   };
 
   const returnToMenu = () => {
+    if (activeView === "create") {
+      resetInvoiceForm();
+    }
     setActiveView("menu");
   };
 
@@ -1554,7 +1637,7 @@ export default function Invoice() {
       )}
 
       {activeView === "create" && (
-        <PagePanel title="Create New Invoice">
+        <PagePanel title={editingInvoiceId ? "Edit Draft Invoice" : "Create New Invoice"}>
           <form onSubmit={handleCreateInvoice}>
             <div className="form-grid form-grid--two">
               <input type="text" name="invoice_number" value={formData.invoice_number} readOnly className="form-control form-control--readonly" />
@@ -1650,7 +1733,7 @@ export default function Invoice() {
             </div>
 
             <ActionButton type="submit" disabled={isCreatingInvoice}>
-              {isCreatingInvoice ? "Creating..." : "Create Invoice"}
+              {isCreatingInvoice ? (editingInvoiceId ? "Saving..." : "Creating...") : (editingInvoiceId ? "Save Invoice" : "Create Invoice")}
             </ActionButton>
           </form>
         </PagePanel>
@@ -1725,6 +1808,7 @@ export default function Invoice() {
                     <th>Invoice #</th>
                     <th>Client</th>
                     <th>Issue Date</th>
+                    <th>Status</th>
                     <th className="data-table__number">Total</th>
                     <th className="invoice-list-table__actions">Action</th>
                   </tr>
@@ -1735,11 +1819,36 @@ export default function Invoice() {
                       <td>{invoice.invoice_number}</td>
                       <td>{invoice.client_name}</td>
                       <td>{invoice.issue_date}</td>
+                      <td>
+                        <span className={`invoice-status invoice-status--${invoice.status || "draft"}`}>
+                          {formatInvoiceStatus(invoice.status)}
+                        </span>
+                      </td>
                       <td className="data-table__number">${Number(invoice.total || 0).toFixed(2)}</td>
                       <td className="invoice-list-table__actions">
                         <ActionButton type="button" variant="confirm" size="sm" onClick={() => downloadPDF(invoice.id, invoice.invoice_number)}>
-                          Download PDF
+                          PDF
                         </ActionButton>
+                        {(invoice.status || "draft") === "draft" && (
+                          <ActionButton type="button" variant="light" size="sm" onClick={() => openDraftInvoiceEditor(invoice)}>
+                            Edit
+                          </ActionButton>
+                        )}
+                        {(invoice.status || "draft") === "draft" && (
+                          <ActionButton type="button" variant="secondary" size="sm" onClick={() => updateInvoiceWorkflow(invoice, sendInvoiceApi, "Send")}>
+                            Send
+                          </ActionButton>
+                        )}
+                        {["draft", "sent"].includes(invoice.status || "draft") && (
+                          <ActionButton type="button" variant="success" size="sm" onClick={() => updateInvoiceWorkflow(invoice, markInvoicePaidApi, "Mark paid")}>
+                            Paid
+                          </ActionButton>
+                        )}
+                        {["draft", "sent"].includes(invoice.status || "draft") && (
+                          <ActionButton type="button" variant="muted" size="sm" onClick={() => updateInvoiceWorkflow(invoice, cancelInvoiceApi, "Cancel")}>
+                            Cancel
+                          </ActionButton>
+                        )}
                         {isAdmin && (
                           <ActionButton
                             type="button"
