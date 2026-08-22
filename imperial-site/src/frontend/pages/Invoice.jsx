@@ -206,6 +206,8 @@ export default function Invoice() {
   const [activeView, setActiveView] = useState("menu");
   const [formData, setFormData] = useState(createInitialFormData());
   const [editingInvoiceId, setEditingInvoiceId] = useState(null);
+  const [draggedInvoiceItemIndex, setDraggedInvoiceItemIndex] = useState(null);
+  const [dragOverInvoiceItemIndex, setDragOverInvoiceItemIndex] = useState(null);
   const [userId, setUserId] = useState(null);
   const [accountType, setAccountType] = useState("");
   const [isCreatingInvoice, setIsCreatingInvoice] = useState(false);
@@ -406,6 +408,54 @@ export default function Invoice() {
           ? [{ product_id: "", description: "", quantity: 1, unit_price: 0, amount: 0 }]
           : prev.items.filter((_, itemIndex) => itemIndex !== index),
     }));
+  };
+
+  const moveInvoiceItem = (fromIndex, toIndex) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) {
+      return;
+    }
+
+    setFormData((prev) => {
+      if (fromIndex >= prev.items.length || toIndex >= prev.items.length) {
+        return prev;
+      }
+
+      const items = [...prev.items];
+      const [movedItem] = items.splice(fromIndex, 1);
+      items.splice(toIndex, 0, movedItem);
+      return { ...prev, items };
+    });
+  };
+
+  const handleInvoiceItemDragStart = (event, index) => {
+    setDraggedInvoiceItemIndex(index);
+    setDragOverInvoiceItemIndex(index);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(index));
+  };
+
+  const handleInvoiceItemDragOver = (event, index) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDragOverInvoiceItemIndex(index);
+  };
+
+  const handleInvoiceItemDrop = (event, index) => {
+    event.preventDefault();
+    const sourceIndex = Number(event.dataTransfer.getData("text/plain"));
+    const fromIndex = Number.isNaN(sourceIndex) ? draggedInvoiceItemIndex : sourceIndex;
+
+    if (fromIndex !== null) {
+      moveInvoiceItem(fromIndex, index);
+    }
+
+    setDraggedInvoiceItemIndex(null);
+    setDragOverInvoiceItemIndex(null);
+  };
+
+  const handleInvoiceItemDragEnd = () => {
+    setDraggedInvoiceItemIndex(null);
+    setDragOverInvoiceItemIndex(null);
   };
 
   const openDraftInvoiceEditor = (invoice) => {
@@ -1638,8 +1688,8 @@ export default function Invoice() {
 
       {activeView === "create" && (
         <PagePanel title={editingInvoiceId ? "Edit Draft Invoice" : "Create New Invoice"}>
-          <form onSubmit={handleCreateInvoice}>
-            <div className="form-grid form-grid--two">
+          <form onSubmit={handleCreateInvoice} className="invoice-create-form">
+            <div className="form-grid form-grid--two invoice-create-details">
               <input type="text" name="invoice_number" value={formData.invoice_number} readOnly className="form-control form-control--readonly" />
               <select
                 name="invoice_format"
@@ -1680,61 +1730,91 @@ export default function Invoice() {
               <input type="date" value={formData.due_date} readOnly className="form-control form-control--readonly" />
             </div>
 
-            <h4>Invoice Items</h4>
-            <div className="invoice-items">
-              <div className="invoice-item-grid invoice-item-grid--header">
-                <span>Item</span>
-                <span>Quantity</span>
-                <span>Unit price</span>
-                <span>Amount</span>
-                <span></span>
-              </div>
-              {formData.items.map((item, index) => (
-                <div key={index} className="invoice-item-grid invoice-item-row">
-                  <select value={item.product_id} onChange={(e) => handleInvoiceItemSelect(index, e.target.value)} className="form-control">
-                    <option value="">{products.length ? "Select item" : "Create products first"}</option>
-                    {products.map((product) => (
-                      <option key={product.id} value={product.id}>
-                        {product.item} ({Number(product.stock_quantity || 0).toFixed(2)} in stock)
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    placeholder="pkg"
-                    value={item.quantity}
-                    onChange={(e) => handleItemChange(index, "quantity", e.target.value)}
-                    className="form-control"
-                  />
-                  <input
-                    type="number"
-                    placeholder="Unit Price /pkg"
-                    value={item.unit_price}
-                    readOnly
-                    className="form-control form-control--readonly"
-                  />
-                  <input type="number" placeholder="Amount" value={item.amount} disabled className="form-control" />
-                  <ActionButton type="button" variant="danger" onClick={() => deleteItem(index)}>
-                    Delete
-                  </ActionButton>
-                </div>
-              ))}
-              <ActionButton type="button" variant="light" onClick={addItem}>
+            <div className="invoice-section-header">
+              <h4>Invoice Items</h4>
+              <ActionButton type="button" variant="light" size="sm" onClick={addItem}>
                 + Add Item
               </ActionButton>
             </div>
-
-            <div className="invoice-totals">
-              <p><strong>Subtotal:</strong> ${subtotal.toFixed(2)}</p>
-              {String(formData.invoice_format || "1") !== "2" && (
-                <p><strong>GST included (10%):</strong> ${tax.toFixed(2)}</p>
-              )}
-              <p className="invoice-totals__total"><strong>Total:</strong> ${total.toFixed(2)}</p>
+            <div className="invoice-items">
+              <div className="invoice-items__scroll">
+                <div className="invoice-item-grid invoice-item-grid--header">
+                  <span className="invoice-item-grid__move">Move</span>
+                  <span>Item</span>
+                  <span>Quantity</span>
+                  <span>Unit price</span>
+                  <span>Amount</span>
+                  <span className="invoice-item-grid__action">Action</span>
+                </div>
+                {formData.items.map((item, index) => (
+                  <div
+                    key={index}
+                    className={`invoice-item-grid invoice-item-row ${
+                      dragOverInvoiceItemIndex === index && draggedInvoiceItemIndex !== null ? "invoice-item-row--drag-over" : ""
+                    }`.trim()}
+                    onDragOver={(e) => handleInvoiceItemDragOver(e, index)}
+                    onDrop={(e) => handleInvoiceItemDrop(e, index)}
+                  >
+                    <button
+                      type="button"
+                      className="invoice-item-drag-handle"
+                      draggable
+                      aria-label={`Move item ${index + 1}`}
+                      title="Drag to reorder"
+                      onDragStart={(e) => handleInvoiceItemDragStart(e, index)}
+                      onDragEnd={handleInvoiceItemDragEnd}
+                    >
+                      ≡
+                    </button>
+                    <select value={item.product_id} onChange={(e) => handleInvoiceItemSelect(index, e.target.value)} className="form-control">
+                      <option value="">{products.length ? "Select item" : "Create products first"}</option>
+                      {products.map((product) => (
+                        <option key={product.id} value={product.id}>
+                          {product.item} ({Number(product.stock_quantity || 0).toFixed(2)} in stock)
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      placeholder="pkg"
+                      value={item.quantity}
+                      onChange={(e) => handleItemChange(index, "quantity", e.target.value)}
+                      className="form-control"
+                    />
+                    <input
+                      type="number"
+                      placeholder="Unit Price /pkg"
+                      value={item.unit_price}
+                      readOnly
+                      className="form-control form-control--readonly"
+                    />
+                    <input type="number" placeholder="Amount" value={item.amount} disabled className="form-control" />
+                    <ActionButton
+                      type="button"
+                      variant="danger"
+                      className="invoice-item-grid__delete"
+                      onClick={() => deleteItem(index)}
+                    >
+                      Delete
+                    </ActionButton>
+                  </div>
+                ))}
+              </div>
             </div>
 
-            <ActionButton type="submit" disabled={isCreatingInvoice}>
-              {isCreatingInvoice ? (editingInvoiceId ? "Saving..." : "Creating...") : (editingInvoiceId ? "Save Invoice" : "Create Invoice")}
-            </ActionButton>
+            <div className="invoice-create-footer">
+              <div className="invoice-totals">
+                <p><strong>Subtotal:</strong> ${subtotal.toFixed(2)}</p>
+                {String(formData.invoice_format || "1") !== "2" && (
+                  <p><strong>GST included (10%):</strong> ${tax.toFixed(2)}</p>
+                )}
+                <p className="invoice-totals__total"><strong>Total:</strong> ${total.toFixed(2)}</p>
+              </div>
+
+              <ActionButton type="submit" disabled={isCreatingInvoice} className="invoice-create-submit">
+                {isCreatingInvoice ? (editingInvoiceId ? "Saving..." : "Creating...") : (editingInvoiceId ? "Save Invoice" : "Create Invoice")}
+              </ActionButton>
+            </div>
           </form>
         </PagePanel>
       )}
@@ -1802,69 +1882,73 @@ export default function Invoice() {
             <p>No invoices match the current filters.</p>
           ) : (
             <>
-              <table className="data-table invoice-list-table">
-                <thead>
-                  <tr>
-                    <th>Invoice #</th>
-                    <th>Client</th>
-                    <th>Issue Date</th>
-                    <th>Status</th>
-                    <th className="data-table__number">Total</th>
-                    <th className="invoice-list-table__actions">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleInvoices.map((invoice) => (
-                    <tr key={invoice.id}>
-                      <td>{invoice.invoice_number}</td>
-                      <td>{invoice.client_name}</td>
-                      <td>{invoice.issue_date}</td>
-                      <td>
-                        <span className={`invoice-status invoice-status--${invoice.status || "draft"}`}>
-                          {formatInvoiceStatus(invoice.status)}
-                        </span>
-                      </td>
-                      <td className="data-table__number">${Number(invoice.total || 0).toFixed(2)}</td>
-                      <td className="invoice-list-table__actions">
-                        <ActionButton type="button" variant="confirm" size="sm" onClick={() => downloadPDF(invoice.id, invoice.invoice_number)}>
-                          PDF
-                        </ActionButton>
-                        {(invoice.status || "draft") === "draft" && (
-                          <ActionButton type="button" variant="light" size="sm" onClick={() => openDraftInvoiceEditor(invoice)}>
-                            Edit
-                          </ActionButton>
-                        )}
-                        {(invoice.status || "draft") === "draft" && (
-                          <ActionButton type="button" variant="secondary" size="sm" onClick={() => updateInvoiceWorkflow(invoice, sendInvoiceApi, "Send")}>
-                            Send
-                          </ActionButton>
-                        )}
-                        {["draft", "sent"].includes(invoice.status || "draft") && (
-                          <ActionButton type="button" variant="success" size="sm" onClick={() => updateInvoiceWorkflow(invoice, markInvoicePaidApi, "Mark paid")}>
-                            Paid
-                          </ActionButton>
-                        )}
-                        {["draft", "sent"].includes(invoice.status || "draft") && (
-                          <ActionButton type="button" variant="muted" size="sm" onClick={() => updateInvoiceWorkflow(invoice, cancelInvoiceApi, "Cancel")}>
-                            Cancel
-                          </ActionButton>
-                        )}
-                        {isAdmin && (
-                          <ActionButton
-                            type="button"
-                            variant="danger"
-                            size="sm"
-                            className="invoice-list-table__delete"
-                            onClick={() => requestDeleteInvoice(invoice)}
-                          >
-                            Delete
-                          </ActionButton>
-                        )}
-                      </td>
+              <div className="invoice-list-scroll">
+                <table className="data-table invoice-list-table">
+                  <thead>
+                    <tr>
+                      <th>Invoice #</th>
+                      <th>Client</th>
+                      <th>Issue Date</th>
+                      <th>Status</th>
+                      <th className="data-table__number">Total</th>
+                      <th className="invoice-list-table__actions">Action</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {visibleInvoices.map((invoice) => (
+                      <tr key={invoice.id}>
+                        <td>{invoice.invoice_number}</td>
+                        <td>{invoice.client_name}</td>
+                        <td>{invoice.issue_date}</td>
+                        <td>
+                          <span className={`invoice-status invoice-status--${invoice.status || "draft"}`}>
+                            {formatInvoiceStatus(invoice.status)}
+                          </span>
+                        </td>
+                        <td className="data-table__number">${Number(invoice.total || 0).toFixed(2)}</td>
+                        <td className="invoice-list-table__actions">
+                          <div className="invoice-action-group">
+                            <ActionButton type="button" variant="confirm" size="sm" onClick={() => downloadPDF(invoice.id, invoice.invoice_number)}>
+                              PDF
+                            </ActionButton>
+                            {(invoice.status || "draft") === "draft" && (
+                              <ActionButton type="button" variant="light" size="sm" onClick={() => openDraftInvoiceEditor(invoice)}>
+                                Edit
+                              </ActionButton>
+                            )}
+                            {(invoice.status || "draft") === "draft" && (
+                              <ActionButton type="button" variant="secondary" size="sm" onClick={() => updateInvoiceWorkflow(invoice, sendInvoiceApi, "Send")}>
+                                Send
+                              </ActionButton>
+                            )}
+                            {["draft", "sent"].includes(invoice.status || "draft") && (
+                              <ActionButton type="button" variant="success" size="sm" onClick={() => updateInvoiceWorkflow(invoice, markInvoicePaidApi, "Mark paid")}>
+                                Paid
+                              </ActionButton>
+                            )}
+                            {["draft", "sent"].includes(invoice.status || "draft") && (
+                              <ActionButton type="button" variant="muted" size="sm" onClick={() => updateInvoiceWorkflow(invoice, cancelInvoiceApi, "Cancel")}>
+                                Cancel
+                              </ActionButton>
+                            )}
+                            {isAdmin && (
+                              <ActionButton
+                                type="button"
+                                variant="danger"
+                                size="sm"
+                                className="invoice-list-table__delete"
+                                onClick={() => requestDeleteInvoice(invoice)}
+                              >
+                                Delete
+                              </ActionButton>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
               {filteredInvoices.length > INVOICE_PAGE_SIZE && (
                 <div className="pagination">
                   <ActionButton

@@ -1,13 +1,17 @@
 import datetime
 import json
+import os
 import sqlite3
 from io import BytesIO
+from xml.sax.saxutils import escape
 
 from flask import Blueprint, jsonify, request
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from core.auth import admin_required, staff_or_admin_required
@@ -29,6 +33,84 @@ INVOICE_STATUS_TRANSITIONS = {
     "mark-paid": {"draft", "sent"},
     "cancel": {"draft", "sent"},
 }
+PDF_FONT_REGULAR = "Helvetica"
+PDF_FONT_BOLD = "Helvetica-Bold"
+PDF_CJK_FONT_REGULAR = PDF_FONT_REGULAR
+PDF_CJK_FONT_BOLD = PDF_FONT_BOLD
+PDF_FONT_REGISTERED = False
+
+
+def register_pdf_fonts():
+    global PDF_CJK_FONT_REGULAR, PDF_CJK_FONT_BOLD, PDF_FONT_REGISTERED
+
+    if PDF_FONT_REGISTERED:
+        return
+
+    font_pairs = [
+        (
+            os.getenv("PDF_CJK_FONT_REGULAR", r"C:\Windows\Fonts\Deng.ttf"),
+            os.getenv("PDF_CJK_FONT_BOLD", r"C:\Windows\Fonts\Dengb.ttf"),
+        ),
+        (r"C:\Windows\Fonts\msyh.ttc", r"C:\Windows\Fonts\msyhbd.ttc"),
+        (r"C:\Windows\Fonts\simhei.ttf", r"C:\Windows\Fonts\simhei.ttf"),
+        (r"C:\Windows\Fonts\NotoSansSC-VF.ttf", r"C:\Windows\Fonts\NotoSansSC-VF.ttf"),
+    ]
+
+    for regular_path, bold_path in font_pairs:
+        if not os.path.exists(regular_path):
+            continue
+
+        try:
+            pdfmetrics.registerFont(TTFont("InvoiceCJK", regular_path))
+            pdfmetrics.registerFont(TTFont("InvoiceCJKBold", bold_path if os.path.exists(bold_path) else regular_path))
+            PDF_CJK_FONT_REGULAR = "InvoiceCJK"
+            PDF_CJK_FONT_BOLD = "InvoiceCJKBold"
+            break
+        except Exception as exc:
+            print(f"Could not register PDF font {regular_path}: {exc}")
+
+    PDF_FONT_REGISTERED = True
+
+
+def is_cjk_character(character):
+    codepoint = ord(character)
+    return (
+        0x3400 <= codepoint <= 0x4DBF
+        or 0x4E00 <= codepoint <= 0x9FFF
+        or 0xF900 <= codepoint <= 0xFAFF
+        or 0x20000 <= codepoint <= 0x2A6DF
+        or 0x2A700 <= codepoint <= 0x2B73F
+        or 0x2B740 <= codepoint <= 0x2B81F
+        or 0x2B820 <= codepoint <= 0x2CEAF
+    )
+
+
+def pdf_text(value, bold=False):
+    text = "" if value is None else str(value)
+    cjk_font = PDF_CJK_FONT_BOLD if bold else PDF_CJK_FONT_REGULAR
+    parts = []
+    current = []
+    current_is_cjk = None
+
+    for character in text:
+        character_is_cjk = is_cjk_character(character)
+        if current and character_is_cjk != current_is_cjk:
+            chunk = escape("".join(current))
+            parts.append(f'<font name="{cjk_font}">{chunk}</font>' if current_is_cjk else chunk)
+            current = []
+
+        current.append(character)
+        current_is_cjk = character_is_cjk
+
+    if current:
+        chunk = escape("".join(current))
+        parts.append(f'<font name="{cjk_font}">{chunk}</font>' if current_is_cjk else chunk)
+
+    return "".join(parts)
+
+
+def pdf_lines(lines, bold=False):
+    return "<br/>".join(pdf_text(line, bold=bold) for line in lines)
 
 
 def get_invoice_by_id(cursor, invoice_id):
@@ -452,6 +534,7 @@ def generate_invoice_pdf(user, invoice_id):
             rightMargin=0.5 * inch
         )
         elements = []
+        register_pdf_fonts()
         styles = getSampleStyleSheet()
 
         black = colors.HexColor('#111111')
@@ -469,7 +552,7 @@ def generate_invoice_pdf(user, invoice_id):
         title_style = ParagraphStyle(
             'TaxTitle',
             parent=styles['Normal'],
-            fontName='Helvetica',
+            fontName=PDF_FONT_REGULAR,
             fontSize=24,
             textColor=black,
             leading=28,
@@ -477,6 +560,7 @@ def generate_invoice_pdf(user, invoice_id):
         company_under_title_style = ParagraphStyle(
             'CompanyUnderTitle',
             parent=styles['Normal'],
+            fontName=PDF_FONT_REGULAR,
             fontSize=10,
             textColor=black,
             alignment=1,
@@ -485,7 +569,7 @@ def generate_invoice_pdf(user, invoice_id):
         bill_to_label_style = ParagraphStyle(
             'BillToLabel',
             parent=styles['Normal'],
-            fontName='Helvetica-Bold',
+            fontName=PDF_FONT_BOLD,
             fontSize=10,
             textColor=black,
             leading=12,
@@ -493,6 +577,7 @@ def generate_invoice_pdf(user, invoice_id):
         bill_to_name_style = ParagraphStyle(
             'BillToName',
             parent=styles['Normal'],
+            fontName=PDF_FONT_REGULAR,
             fontSize=10,
             textColor=black,
             leading=12,
@@ -500,7 +585,7 @@ def generate_invoice_pdf(user, invoice_id):
         small_label_style = ParagraphStyle(
             'SmallLabel',
             parent=styles['Normal'],
-            fontName='Helvetica-Bold',
+            fontName=PDF_FONT_BOLD,
             fontSize=9,
             textColor=black,
             leading=11,
@@ -508,6 +593,7 @@ def generate_invoice_pdf(user, invoice_id):
         small_value_style = ParagraphStyle(
             'SmallValue',
             parent=styles['Normal'],
+            fontName=PDF_FONT_REGULAR,
             fontSize=9,
             textColor=black,
             leading=11,
@@ -515,6 +601,7 @@ def generate_invoice_pdf(user, invoice_id):
         body_style = ParagraphStyle(
             'Body',
             parent=styles['Normal'],
+            fontName=PDF_FONT_REGULAR,
             fontSize=9.5,
             textColor=black,
             leading=12,
@@ -522,12 +609,12 @@ def generate_invoice_pdf(user, invoice_id):
         body_bold_style = ParagraphStyle(
             'BodyBold',
             parent=body_style,
-            fontName='Helvetica-Bold',
+            fontName=PDF_FONT_BOLD,
         )
         payment_title_style = ParagraphStyle(
             'PaymentTitle',
             parent=styles['Normal'],
-            fontName='Helvetica',
+            fontName=PDF_FONT_REGULAR,
             fontSize=24,
             textColor=black,
             leading=26,
@@ -535,6 +622,7 @@ def generate_invoice_pdf(user, invoice_id):
         payment_hint_style = ParagraphStyle(
             'PaymentHint',
             parent=styles['Normal'],
+            fontName=PDF_FONT_REGULAR,
             fontSize=8.5,
             textColor=grey,
             leading=10,
@@ -542,11 +630,12 @@ def generate_invoice_pdf(user, invoice_id):
         advice_value_bold_style = ParagraphStyle(
             'AdviceValueBold',
             parent=body_style,
-            fontName='Helvetica-Bold',
+            fontName=PDF_FONT_BOLD,
         )
         totals_label_style = ParagraphStyle(
             'TotalsLabel',
             parent=styles['Normal'],
+            fontName=PDF_FONT_REGULAR,
             fontSize=9.5,
             textColor=black,
             alignment=2,
@@ -554,6 +643,7 @@ def generate_invoice_pdf(user, invoice_id):
         totals_value_style = ParagraphStyle(
             'TotalsValue',
             parent=styles['Normal'],
+            fontName=PDF_FONT_REGULAR,
             fontSize=9.5,
             textColor=black,
             alignment=2,
@@ -561,12 +651,12 @@ def generate_invoice_pdf(user, invoice_id):
         totals_total_label_style = ParagraphStyle(
             'TotalsTotalLabel',
             parent=totals_label_style,
-            fontName='Helvetica-Bold',
+            fontName=PDF_FONT_BOLD,
         )
         totals_total_value_style = ParagraphStyle(
             'TotalsTotalValue',
             parent=totals_value_style,
-            fontName='Helvetica-Bold',
+            fontName=PDF_FONT_BOLD,
         )
 
         items = json.loads(invoice[6])
@@ -618,11 +708,11 @@ def generate_invoice_pdf(user, invoice_id):
         right_info_rows = [
             [
                 Paragraph("Invoice Date", small_label_style),
-                Paragraph(business_name, small_value_style),
+                Paragraph(pdf_text(business_name), small_value_style),
             ],
             [
                 Paragraph(issue_date, small_value_style),
-                Paragraph("<br/>".join(business_address_lines), small_value_style),
+                Paragraph(pdf_lines(business_address_lines), small_value_style),
             ],
             [
                 Paragraph("Invoice Number", small_label_style),
@@ -662,7 +752,7 @@ def generate_invoice_pdf(user, invoice_id):
 
         bill_to_table = Table([
             [Paragraph("Bill To:", bill_to_label_style)],
-            [Paragraph(invoice[3], bill_to_name_style)],
+            [Paragraph(pdf_text(invoice[3]), bill_to_name_style)],
         ], colWidths=[3.9 * inch], hAlign='LEFT')
         bill_to_table.setStyle(TableStyle([
             ('LEFTPADDING', (0, 0), (-1, -1), 0),
@@ -687,7 +777,7 @@ def generate_invoice_pdf(user, invoice_id):
         for item in items:
             item_amount = float(item.get('amount', 0))
             table_data.append([
-                item.get("description", ""),
+                Paragraph(pdf_text(item.get("description", "")), body_style),
                 f"{float(item.get('quantity', 0)):.2f}",
                 f"{float(item.get('unit_price', 0)):.2f}",
                 f"{item_amount:.2f}",
@@ -695,7 +785,8 @@ def generate_invoice_pdf(user, invoice_id):
 
         items_table = Table(table_data, colWidths=[4.25 * inch, 1.0 * inch, 1.05 * inch, 1.2 * inch])
         items_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 0), (-1, 0), PDF_FONT_BOLD),
+            ('FONTNAME', (0, 1), (-1, -1), PDF_FONT_REGULAR),
             ('FONTSIZE', (0, 0), (-1, 0), 8.5),
             ('FONTSIZE', (0, 1), (-1, -1), 9),
             ('TEXTCOLOR', (0, 0), (-1, -1), black),
@@ -746,7 +837,7 @@ def generate_invoice_pdf(user, invoice_id):
         elements.append(Spacer(1, 0.18 * inch))
 
         bank_details_lines = [Paragraph(f"Due Date: {due_date}", body_bold_style)]
-        bank_details_lines.extend(Paragraph(line_text, body_style) for line_text in eft_lines)
+        bank_details_lines.extend(Paragraph(pdf_text(line_text), body_style) for line_text in eft_lines)
         bank_details = Table([[line] for line in bank_details_lines], colWidths=[7.5 * inch], hAlign='LEFT')
         bank_details.setStyle(TableStyle([
             ('LEFTPADDING', (0, 0), (-1, -1), 0),
@@ -769,7 +860,7 @@ def generate_invoice_pdf(user, invoice_id):
         payment_advice_elements = [advice_dash]
 
         to_block = Table([
-            [Paragraph("To:", body_style), Paragraph(f"{business_name}<br/>{'<br/>'.join(business_address_lines)}", body_style)],
+            [Paragraph("To:", body_style), Paragraph(f"{pdf_text(business_name)}<br/>{pdf_lines(business_address_lines)}", body_style)],
         ], colWidths=[0.55 * inch, 2.95 * inch])
         to_block.setStyle(TableStyle([
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
@@ -780,15 +871,16 @@ def generate_invoice_pdf(user, invoice_id):
         ]))
 
         advice_rows = [
-            ["Customer", invoice[3]],
-            ["Invoice Number", str(invoice[2])],
+            ["Customer", Paragraph(pdf_text(invoice[3]), body_style)],
+            ["Invoice Number", Paragraph(pdf_text(invoice[2]), body_style)],
             ["Amount Due", Paragraph(f"{float(invoice[9]):.2f}", advice_value_bold_style)],
-            ["Due Date", due_date],
+            ["Due Date", Paragraph(pdf_text(due_date), body_style)],
             ["Amount Enclosed", ""],
         ]
         advice_table = Table(advice_rows, colWidths=[1.2 * inch, 2.3 * inch])
         advice_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 0), (0, -1), PDF_FONT_BOLD),
+            ('FONTNAME', (1, 0), (1, -1), PDF_FONT_REGULAR),
             ('FONTSIZE', (0, 0), (-1, -1), 9),
             ('LINEBELOW', (0, 1), (-1, 1), 0.35, light_line),
             ('LINEBELOW', (0, 3), (-1, 3), 0.35, light_line),
